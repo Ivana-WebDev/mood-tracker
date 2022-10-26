@@ -1,0 +1,26 @@
+//Color theme
+$background-light: #f1faee;
+$primary-dark: #331832;
+$primary-light: #c6d8d3;
+$accent-one: #f0544f;
+$accent-two: #ffc23d;
+
+//Breakpoints
+$bp-small: 481px;
+$bp-medium: 992px;
+$bp-large: 1296px;
+@mixin respond-to($bp) {
+  @if $bp == "small" {
+    @media (max-width: $bp-small) {
+      @content;
+    }
+  } @else if $bp == "medium" {
+    @media (max-width: $bp-medium) {
+      @content;
+    }
+  } @else if $bp == "large" {
+    @media (max-width: $bp-large) {
+      @content;
+    }
+  }
+}

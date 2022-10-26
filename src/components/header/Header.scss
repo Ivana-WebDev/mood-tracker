@@ -1,0 +1,86 @@
+@import "../../global/styles/consts.scss";
+
+.header {
+  padding: 5px 10%;
+  background-color: $primary-dark;
+  color: $accent-two;
+  @include respond-to("large") {
+    padding: 5px 5%;
+  }
+  &-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    .header-item {
+      flex-basis: auto;
+      .logo-wrapper {
+        display: flex;
+        align-items: center;
+        h2 {
+          margin: 0;
+          text-transform: uppercase;
+          font-weight: 200;
+          @include respond-to("small") {
+            font-size: 16px;
+          }
+        }
+      }
+      .logo {
+        height: 46px;
+        margin-right: 28px;
+        @include respond-to("small") {
+          margin-right: 16px;
+        }
+      }
+    }
+    .header-item:first-child {
+      text-align: left;
+    }
+    .header-item:last-child {
+      text-align: right;
+    }
+    .dropdown {
+        position: relative;
+      a {
+        text-decoration: none;
+      }
+      .dropbtn {
+        color: $accent-two;
+        font-size: 38px;
+        display: inline-block;
+        margin-top: 13px;
+        transition: all 0.2s ease-out;
+      }
+      .dropbtn:hover {
+        color: $accent-one;
+      }
+      .dropdown-content {
+        display: none;
+        position: absolute;
+        right: 0;
+        background-color: $accent-two;
+        min-width: 160px;
+        box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+        z-index: 1;
+        a {
+            display: block;
+            text-align: left;
+            color: $primary-dark;
+            font-size: 16px;
+            font-weight: 500;
+            padding: 10px;
+            border-bottom: 2px solid $primary-dark;
+        }
+        a:last-child {
+            border: none;
+        }
+        a:hover {
+            background-color: $accent-one;
+        }
+      }
+    }
+    .dropdown:hover .dropdown-content {
+      display: block;
+    }
+  }
+}

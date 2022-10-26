@@ -1,0 +1,8 @@
+@import "../../global/styles/consts.scss";
+
+.sidenav {
+    text-align: left;
+    &-content {
+        background-color: $primary-light;
+    }
+}
