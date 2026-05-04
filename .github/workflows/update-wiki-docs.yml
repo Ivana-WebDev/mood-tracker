@@ -1,0 +1,186 @@
+name: Update Wiki Documentation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - '.github/workflows/update-wiki-docs.yml'
+
+permissions:
+  contents: read
+  wiki: write
+
+jobs:
+  update-wiki:
+    runs-on: ubuntu-latest
+    name: Review Codebase and Update Wiki
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Analyze codebase structure
+        id: analyze
+        run: |
+          # Get project info from package.json
+          echo "PROJECT_NAME=$(jq -r '.name' package.json)" >> $GITHUB_OUTPUT
+          echo "PROJECT_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
+          
+          # Count files
+          echo "SRC_FILES=$(find src -type f 2>/dev/null | wc -l)" >> $GITHUB_OUTPUT
+          echo "TS_FILES=$(find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | wc -l)" >> $GITHUB_OUTPUT
+
+      - name: Checkout wiki
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki-temp
+
+      - name: Update home page
+        run: |
+          cat > wiki-temp/Home.md << 'EOF'
+          # Mood Tracker - Documentation
+          
+          Welcome to the Mood Tracker documentation. This wiki is automatically synchronized with your main branch.
+          
+          ## 📋 Project Overview
+          
+          **Mood Tracker** is a React application for tracking and managing daily mood records.
+          
+          - **Version**: ${{ steps.analyze.outputs.PROJECT_VERSION }}
+          - **Language**: TypeScript
+          - **Framework**: React 18
+          - **Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}
+          - **TypeScript Files**: ${{ steps.analyze.outputs.TS_FILES }}
+          
+          ## 🚀 Quick Start
+          
+          ### Installation
+          ```bash
+          npm install
+          ```
+          
+          ### Running the App
+          ```bash
+          npm start
+          ```
+          The app opens at [http://localhost:3000](http://localhost:3000)
+          
+          ### Building for Production
+          ```bash
+          npm build
+          ```
+          
+          ## 📚 Documentation
+          
+          - [[Setup & Installation|Setup]]
+          - [[Architecture|Architecture]]
+          - [[Development Guide|Development]]
+          
+          ## 📦 Tech Stack
+          
+          | Dependency | Version |
+          |------------|---------|
+          | React | 18.2.0 |
+          | TypeScript | 4.8.4 |
+          | React Testing Library | 13.4.0 |
+          | Jest | Latest (via react-scripts) |
+          
+          ## 🔨 Available Scripts
+          
+          - `npm start` - Run dev server
+          - `npm build` - Build for production
+          - `npm test` - Run tests
+          - `npm eject` - Eject from Create React App
+          
+          ---
+          
+          ℹ️ **Last Updated**: Via automated workflow
+          
+          **Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+
+      - name: Update architecture page
+        run: |
+          cat > wiki-temp/Architecture.md << 'EOF'
+          # Architecture
+          
+          ## Project Structure
+          
+          ```
+          mood-tracker/
+          ├── src/                    # Source code
+          ├── public/                 # Static assets
+          ├── package.json            # Dependencies & scripts
+          ├── tsconfig.json           # TypeScript config
+          └── README.md               # Project README
+          ```
+          
+          ## Technology Stack
+          
+          ### Core Libraries
+          - **React 18.2.0** - UI library
+          - **TypeScript 4.8.4** - Type-safe JavaScript
+          - **React DOM 18.2.0** - DOM rendering
+          
+          ### Testing Stack
+          - **Jest** - Test runner
+          - **React Testing Library 13.4.0** - Component testing
+          - **@testing-library/user-event 13.5.0** - User interaction simulation
+          
+          ### Build & Development
+          - **Create React App (react-scripts 5.0.1)** - Build tooling
+          - **Web Vitals 2.1.4** - Performance metrics
+          
+          ## Development Workflow
+          
+          1. **Development**: `npm start` → Hot reload dev server
+          2. **Testing**: `npm test` → Watch mode test runner
+          3. **Building**: `npm build` → Optimized production bundle
+          
+          ## Configuration
+          
+          ### TypeScript
+          - Strict mode enabled
+          - Target: ES2020
+          - Module: ESNext
+          - JSX: React
+          
+          ### ESLint
+          Extends Create React App recommended rules and Jest config
+          
+          ### Browser Support
+          - **Production**: >0.2%, not dead, not op_mini all
+          - **Development**: Latest versions of Chrome, Firefox, Safari
+          
+          ---
+          
+          *Auto-generated from codebase analysis*
+          EOF
+
+      - name: Commit and push changes
+        run: |
+          cd wiki-temp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Home.md Architecture.md
+          
+          if git diff --cached --quiet; then
+            echo "No changes detected"
+          else
+            git commit -m "docs: Update wiki documentation from codebase analysis [skip ci]"
+            git push
+            echo "✅ Wiki updated successfully!"
+          fi
