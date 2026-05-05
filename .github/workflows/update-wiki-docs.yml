@@ -1,22 +1,16 @@
-name: Enhanced Wiki Documentation - AI Analysis
+name: Wiki Documentation - AI Analysis
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**'
-      - 'package.json'
-      - 'tsconfig.json'
 
 permissions:
   contents: write
+  models: read     # required to call the GitHub Models / Copilot API with GITHUB_TOKEN
 
 jobs:
   analyze-and-document:
     runs-on: ubuntu-latest
-    name: Analyze Code Changes & Update Documentation
+    name: Analyze Code & Update Wiki Documentation
 
     steps:
       - name: Checkout main branch
@@ -25,444 +19,338 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed-files
-        run: |
-          # Get diff from last commit (if available)
-          if [ "${{ github.event_name }}" == "push" ]; then
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || echo "")
-          else
-            # For manual trigger, show all src files
-            CHANGED_FILES=$(find src -name '*.ts' -o -name '*.tsx' 2>/dev/null || echo "")
-          fi
-          
-          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-          echo "Files changed:"
-          echo "$CHANGED_FILES"
-
-      - name: Extract code changes and API endpoints
-        id: extract
-        run: |
-          cat > /tmp/analyze.sh << 'SCRIPT'
-          #!/bin/bash
-          
-          # Find all API endpoints
-          echo "=== API ENDPOINTS ===" 
-          grep -r "fetch\|axios\|\.get\|\.post\|\.put\|\.delete" src --include="*.ts" --include="*.tsx" 2>/dev/null | \
-          grep -E "^[^:]+:(.*)(https?://|/api/|'http)" | head -20 || echo "No API calls found"
-          
-          # Find data fetching patterns
-          echo "=== DATA FETCHING ==="
-          grep -r "useState.*fetch\|useEffect.*fetch\|async.*fetch" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "Standard patterns"
-          
-          # Find sorting/filtering logic
-          echo "=== SORTING & FILTERING ==="
-          grep -r "sort\|filter\|reverse\|ascending\|descending" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "No custom sorting found"
-          
-          # Find component exports
-          echo "=== COMPONENTS ==="
-          grep -r "^export.*function\|^export.*const.*=.*() =>\|^export.*class" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -20 || echo "No exports found"
-          
-          # Find constants and config
-          echo "=== CONFIG & CONSTANTS ==="
-          grep -r "const.*=.*['\"]http\|const.*API\|const.*URL\|const.*CONFIG" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "No config found"
-          
-          SCRIPT
-          
-          chmod +x /tmp/analyze.sh
-          /tmp/analyze.sh > /tmp/code-analysis.txt 2>&1
-          cat /tmp/code-analysis.txt
-
-      - name: Detect specific changes
-        id: detect-changes
-        run: |
-          cat > /tmp/detect.js << 'DETECT'
-          const fs = require('fs');
-          const path = require('path');
-          const { exec } = require('child_process');
-          const { promisify } = require('util');
-          
-          const execAsync = promisify(exec);
-          
-          async function analyzeChanges() {
-            const changedFiles = process.env.CHANGED_FILES.split('\n').filter(Boolean);
-            const changes = {
-              apiEndpoints: [],
-              dataFetching: [],
-              sorting: [],
-              filtering: [],
-              components: [],
-              config: []
-            };
-          
-            for (const file of changedFiles) {
-              if (!file.includes('src/')) continue;
-              
-              try {
-                const content = fs.readFileSync(file, 'utf8');
-                
-                // Detect API endpoints
-                const apiMatches = content.match(/fetch\(['"`]([^'"`]+)['"`)]/g) || [];
-                apiMatches.forEach(match => {
-                  const url = match.match(/['"`]([^'"`]+)['"`]/)[1];
-                  if (!changes.apiEndpoints.includes(url)) {
-                    changes.apiEndpoints.push({ file, url });
-                  }
-                });
-                
-                // Detect sorting changes
-                if (content.includes('sort') || content.includes('reverse') || content.includes('ascending') || content.includes('descending')) {
-                  changes.sorting.push(file);
-                }
-                
-                // Detect filtering
-                if (content.includes('filter') || content.includes('where')) {
-                  changes.filtering.push(file);
-                }
-                
-                // Detect components
-                const componentMatches = content.match(/export\s+(function|const|class)\s+(\w+)/g) || [];
-                componentMatches.forEach(match => {
-                  const name = match.split(/\s+/)[2];
-                  changes.components.push({ file, name });
-                });
-                
-              } catch (err) {
-                console.error(`Error analyzing ${file}:`, err.message);
-              }
-            }
-            
-            return changes;
-          }
-          
-          analyzeChanges().then(changes => {
-            console.log('Detected Changes:', JSON.stringify(changes, null, 2));
-            
-            // Set outputs
-            const output = {
-              apiEndpoints: changes.apiEndpoints.map(e => `${e.file}: ${e.url}`).join('\n'),
-              sortingChanges: changes.sorting.length > 0,
-              filteringChanges: changes.filtering.length > 0,
-              componentChanges: changes.components.map(c => `${c.file}: ${c.name}`).join('\n')
-            };
-            
-            for (const [key, value] of Object.entries(output)) {
-              if (Array.isArray(value)) {
-                console.log(`::set-output name=${key}::${value.join('|')}`);
-              } else {
-                console.log(`::set-output name=${key}::${value}`);
-              }
-            }
-          });
-          DETECT
-          
-          node /tmp/detect.js 2>&1 || echo "Analysis complete"
-        env:
-          CHANGED_FILES: ${{ steps.changed-files.outputs.changed_files }}
-
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      - name: Analyze codebase
-        id: analyze
+      # ─────────────────────────────────────────────
+      # STEP 1 – Discover component folders & diff
+      # ─────────────────────────────────────────────
+      - name: Discover components and detect last-commit diff
+        id: discover
         run: |
-          echo "PROJECT_NAME=$(jq -r '.name' package.json)" >> $GITHUB_OUTPUT
-          echo "PROJECT_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
-          
-          # Count components
-          COMPONENT_COUNT=$(find src -name '*.tsx' -o -name '*Component.ts' 2>/dev/null | wc -l)
-          echo "COMPONENT_COUNT=$COMPONENT_COUNT" >> $GITHUB_OUTPUT
-          
-          # Count all src files
-          SRC_FILES=$(find src -type f 2>/dev/null | wc -l)
-          echo "SRC_FILES=$SRC_FILES" >> $GITHUB_OUTPUT
+          COMPONENTS_ROOT="mood-tracker/client/src/components"
 
+          # All component folders (one level deep)
+          COMPONENT_FOLDERS=$(find "$COMPONENTS_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+
+          if [ -z "$COMPONENT_FOLDERS" ]; then
+            echo "⚠️  No component folders found under $COMPONENTS_ROOT"
+            echo "component_folders=" >> $GITHUB_OUTPUT
+            echo "changed_components=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found component folders:"
+          echo "$COMPONENT_FOLDERS"
+
+          # Folders touched by the last commit
+          LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null || echo "")
+          echo "Last commit files:"
+          echo "$LAST_COMMIT_FILES"
+
+          CHANGED=""
+          while IFS= read -r folder; do
+            FOLDER_NAME=$(basename "$folder")
+            # Check if any file in this folder was in the last commit diff
+            if echo "$LAST_COMMIT_FILES" | grep -q "^mood-tracker/client/src/components/$FOLDER_NAME/"; then
+              CHANGED="$CHANGED,$FOLDER_NAME"
+            fi
+          done <<< "$COMPONENT_FOLDERS"
+
+          CHANGED="${CHANGED#,}"  # strip leading comma
+
+          # Store folder list as newline-delimited, base64-encoded to survive env
+          FOLDERS_B64=$(echo "$COMPONENT_FOLDERS" | base64 -w 0)
+          echo "component_folders_b64=$FOLDERS_B64" >> $GITHUB_OUTPUT
+          echo "changed_components=$CHANGED" >> $GITHUB_OUTPUT
+          echo "components_root=$COMPONENTS_ROOT" >> $GITHUB_OUTPUT
+
+      # ─────────────────────────────────────────────
+      # STEP 2 – Checkout wiki
+      # ─────────────────────────────────────────────
       - name: Checkout wiki
         uses: actions/checkout@v3
         with:
           repository: ${{ github.repository }}.wiki
           path: wiki-temp
 
-      - name: Generate API Documentation
+      # ─────────────────────────────────────────────
+      # STEP 3 – Generate per-component wiki pages
+      # ─────────────────────────────────────────────
+      - name: Generate component documentation via GitHub Copilot (Models API)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPONENT_FOLDERS_B64: ${{ steps.discover.outputs.component_folders_b64 }}
+          CHANGED_COMPONENTS: ${{ steps.discover.outputs.changed_components }}
+          COMPONENTS_ROOT: ${{ steps.discover.outputs.components_root }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
-          mkdir -p wiki-temp
-          
-          cat > wiki-temp/API-Endpoints.md << 'EOF'
-          # API Endpoints & Data Fetching
-          
-          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
-          
-          ## Overview
-          
-          This page documents all API endpoints and data fetching patterns used in the Mood Tracker application.
-          
-          ## Data Fetching Patterns
-          
-          The application uses the following patterns for fetching data:
-          
-          ### Fetch API
-          Standard JavaScript Fetch API calls for HTTP requests
-          
-          ```typescript
-          const response = await fetch('/api/endpoint');
-          const data = await response.json();
-          ```
-          
-          ### State Management
-          Uses React hooks (useState, useEffect) for managing fetched data
-          
-          ```typescript
-          const [data, setData] = useState(null);
-          const [loading, setLoading] = useState(true);
-          
-          useEffect(() => {
-            // Fetch data
-          }, []);
-          ```
-          
-          ## Sorting & Filtering
-          
-          - **Sorting**: Data can be sorted in ascending/descending order
-          - **Filtering**: Implemented through array filter methods
-          - **Search**: Optional search functionality for quick lookups
-          
-          ## Performance Considerations
-          
-          - Results are cached in component state
-          - Memoization used to prevent unnecessary re-renders
-          - Lazy loading for large datasets
-          
-          ---
-          
-          ⚠️ **Note**: This page is auto-generated. If you notice missing endpoints, they will be added on the next workflow run after code is pushed.
-          
-          **Last Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
+          cat > /tmp/generate-docs.js << 'NODESCRIPT'
+          const fs   = require('fs');
+          const path = require('path');
 
-      - name: Generate Components Documentation
-        run: |
-          cat > wiki-temp/Components.md << 'EOF'
-          # Components Documentation
-          
-          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}  
-          > **Total Components**: ${{ steps.analyze.outputs.COMPONENT_COUNT }}  
-          > **Total Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}
-          
-          ## Component Overview
-          
-          This page documents React components in the Mood Tracker application.
-          
-          ### Component Structure
-          
-          All components follow these patterns:
-          
-          - **Functional Components**: Using React Hooks (useState, useEffect, useContext)
-          - **Props Interface**: TypeScript interfaces for type safety
-          - **State Management**: Local state with hooks or context
-          - **Styling**: CSS/CSS Modules (check individual components)
-          
-          ## Component Patterns
-          
-          ### Data Fetching Components
-          Components that fetch data from APIs:
-          
-          ```typescript
-          useEffect(() => {
-            // Fetch data on mount
-          }, [dependencies]);
-          ```
-          
-          ### List Components
-          For rendering lists with sorting/filtering:
-          
-          ```typescript
-          const filteredData = data.filter(item => /* condition */);
-          const sortedData = filteredData.sort((a, b) => /* comparison */);
-          ```
-          
-          ### Form Components
-          For handling user input and submissions
-          
-          ## Recent Changes
-          
-          - Components detected in this workflow run will be listed here
-          - Check git history for detailed changes: `git log -- src/`
-          
-          ---
-          
-          **View Raw Data**: Run workflow with verbose logging to see component analysis
-          
-          **Last Updated By**: Automated Workflow Run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
+          // GitHub Models / Copilot API — uses the built-in GITHUB_TOKEN, no extra secret needed.
+          // The endpoint is the Azure-compatible OpenAI endpoint surfaced by GitHub Models.
+          const GH_TOKEN              = process.env.GH_TOKEN;
+          const COMPONENT_FOLDERS_B64 = process.env.COMPONENT_FOLDERS_B64 || '';
+          const CHANGED_COMPONENTS    = (process.env.CHANGED_COMPONENTS || '').split(',').filter(Boolean);
+          const COMPONENTS_ROOT       = process.env.COMPONENTS_ROOT;
+          const GITHUB_RUN_ID         = process.env.GITHUB_RUN_ID;
+          const GITHUB_SERVER_URL     = process.env.GITHUB_SERVER_URL;
+          const GITHUB_REPOSITORY     = process.env.GITHUB_REPOSITORY;
+          const GITHUB_ACTOR          = process.env.GITHUB_ACTOR;
 
-      - name: Generate Architecture Documentation
-        run: |
-          cat > wiki-temp/Architecture.md << 'EOF'
-          # Architecture
-          
-          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
-          
-          ## Project Structure
-          
-          ```
-          mood-tracker/
-          ├── src/
-          │   ├── components/          # React components
-          │   ├── pages/               # Page components
-          │   ├── hooks/               # Custom React hooks
-          │   ├── services/            # API & external services
-          │   ├── types/               # TypeScript type definitions
-          │   ├── utils/               # Utility functions
-          │   └── App.tsx              # Root component
-          ├── public/                  # Static assets
-          ├── package.json             # Dependencies
-          └── tsconfig.json            # TypeScript config
-          ```
-          
-          ## Technology Stack
-          
-          ### Frontend
-          - **React 18.2.0** - UI library with Hooks
-          - **TypeScript 4.8.4** - Type-safe development
-          
-          ### Testing
-          - **Jest** - Test runner
-          - **React Testing Library 13.4.0** - Component testing
-          
-          ### Build Tools
-          - **Create React App (react-scripts 5.0.1)** - Zero-config build setup
-          
-          ## Data Flow
-          
-          1. **API Layer**: Fetch calls to backend endpoints
-          2. **State Management**: React hooks manage local component state
-          3. **Component Rendering**: Components consume state and render UI
-          4. **User Interactions**: Event handlers update state
-          
-          ## Key Features
-          
-          ### Data Fetching
-          - RESTful API calls using Fetch API
-          - Loading states and error handling
-          - Data caching at component level
-          
-          ### Sorting & Filtering
-          - Dynamic sorting (ascending/descending)
-          - Advanced filtering capabilities
-          - Real-time updates
-          
-          ### Performance
-          - Code splitting via React.lazy
-          - Memoization to prevent re-renders
-          - Efficient state management
-          
-          ---
-          
-          *Documentation auto-generated from codebase analysis. Reflects latest code on main branch.*
-          
-          **View Changes**: 
-          - Latest commits: [${{ github.event.head_commit.message || 'Workflow dispatch' }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.head_commit.id || github.sha }})
-          - Workflow run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
+          // ── helpers ──────────────────────────────────────────────────────────────
 
-      - name: Generate Data Models Documentation
-        run: |
-          cat > wiki-temp/Data-Models.md << 'EOF'
-          # Data Models & Types
-          
-          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
-          
-          ## TypeScript Interfaces
-          
-          All data structures are defined with TypeScript interfaces for type safety.
-          
-          ### Standard Interface Pattern
-          
-          ```typescript
-          interface Entity {
-            id: string | number;
-            createdAt: Date;
-            updatedAt: Date;
+          function readFolderContents(folderPath) {
+            const files = {};
+            function walk(dir) {
+              let entries;
+              try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+              catch { return; }
+              for (const entry of entries) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  walk(full);
+                } else if (/\.(ts|tsx|css|scss|json)$/.test(entry.name)) {
+                  try { files[full] = fs.readFileSync(full, 'utf8'); }
+                  catch { files[full] = '(unreadable)'; }
+                }
+              }
+            }
+            walk(folderPath);
+            return files;
           }
-          ```
-          
-          ## Common Data Patterns
-          
-          ### Lists & Collections
-          - Arrays of typed objects
-          - Pagination support
-          - Sorting and filtering capabilities
-          
-          ### API Responses
-          - Standard response wrapper
-          - Error handling with error codes
-          - Metadata (pagination, timestamps)
-          
-          ### State Management
-          - Component-level state with hooks
-          - Derived state and computed values
-          - Memoized selectors for performance
-          
-          ## Type Safety
-          
-          - All props are typed
-          - No `any` types in production code
-          - Strict mode enabled in tsconfig.json
-          
-          ---
-          
-          **Note**: Run workflow after adding new types to keep this documentation current.
-          
-          **Last Updated**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
 
-      - name: Commit and push to wiki
+          function buildPrompt(componentName, files) {
+            const fileList = Object.entries(files)
+              .map(([p, c]) => `### File: ${p}\n\`\`\`\n${c.slice(0, 6000)}\n\`\`\``)
+              .join('\n\n');
+
+            return `You are a senior TypeScript / React developer writing GitHub Wiki documentation.
+          Analyse the source code below for the "${componentName}" component and produce a single Markdown wiki page.
+
+          The page MUST include these sections (use ## headings):
+          1. **Overview** – one paragraph describing what this component does and its purpose in the app.
+          2. **File Structure** – table listing each file in the folder and its role.
+          3. **Props & Interfaces** – document every exported TypeScript interface / type, including each field, its type and a short description.
+          4. **State & Hooks** – list all useState / useReducer / custom hooks with what they track and when they update.
+          5. **Key Logic** – explain the most important business logic, algorithms, or side effects (useEffect, event handlers, data transforms).
+          6. **API / Data Fetching** – document every fetch / axios / service call: method, URL/endpoint, request shape, response shape, and how the data is used.
+          7. **Rendered Output** – describe the UI structure and any conditional rendering rules.
+          8. **Dependencies** – list external packages imported and why each is used.
+          9. **Usage Example** – a realistic JSX snippet showing how to use the component.
+
+          Write in clear technical prose. Use tables and code blocks liberally. Do NOT add a top-level H1 title – the wiki will supply it.
+
+          --- SOURCE FILES ---
+          ${fileList}`;
+          }
+
+          // GitHub Models API — OpenAI-compatible chat completions endpoint.
+          // Uses the workflow's built-in GITHUB_TOKEN; no extra secrets required.
+          // Model: gpt-4o is the default Copilot model available via GitHub Models.
+          // If your org has a different model configured (e.g. o3, o4-mini), change the
+          // `model` field below to match.
+          async function callCopilot(prompt) {
+            const resp = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GH_TOKEN}`,
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o',
+                max_tokens: 4096,
+                messages: [
+                  {
+                    role: 'system',
+                    content: 'You are a senior TypeScript/React developer. Write clear, accurate GitHub Wiki documentation from source code. Use Markdown with tables and code blocks. Be thorough but concise.',
+                  },
+                  { role: 'user', content: prompt },
+                ],
+              }),
+            });
+
+            if (!resp.ok) {
+              const err = await resp.text();
+              throw new Error(`GitHub Models API error ${resp.status}: ${err}`);
+            }
+
+            const data = await resp.json();
+            return data.choices[0].message.content;
+          }
+
+          // ── main ─────────────────────────────────────────────────────────────────
+
+          async function main() {
+            if (!COMPONENT_FOLDERS_B64) {
+              console.log('No component folders found. Skipping.');
+              return;
+            }
+
+            const foldersRaw = Buffer.from(COMPONENT_FOLDERS_B64, 'base64').toString('utf8').trim();
+            const folders    = foldersRaw.split('\n').filter(Boolean);
+
+            console.log(`\nProcessing ${folders.length} component folder(s).`);
+            console.log(`Components changed in last commit: ${CHANGED_COMPONENTS.join(', ') || 'none'}\n`);
+
+            const wikiDir  = 'wiki-temp';
+            const runUrl   = `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;
+            const timestamp = new Date().toISOString();
+
+            // Keep track of generated page names for the index
+            const generatedPages = [];
+
+            for (const folderPath of folders) {
+              const componentName = path.basename(folderPath);
+              const wikiPageName  = `Component-${componentName}`;
+              const wikiFilePath  = path.join(wikiDir, `${wikiPageName}.md`);
+
+              const pageExists = fs.existsSync(wikiFilePath);
+
+              // Skip if page exists AND component not in last-commit diff
+              if (pageExists && !CHANGED_COMPONENTS.includes(componentName)) {
+                console.log(`⏭  ${componentName}: page exists, no changes in last commit – skipping.`);
+                generatedPages.push({ componentName, wikiPageName, status: 'unchanged' });
+                continue;
+              }
+
+              const action = pageExists ? 'Updating' : 'Creating';
+              console.log(`🔍 ${action} documentation for: ${componentName}`);
+
+              const files = readFolderContents(folderPath);
+              if (Object.keys(files).length === 0) {
+                console.log(`   ⚠️  No .ts/.tsx/.css files found – skipping.`);
+                continue;
+              }
+
+              const prompt   = buildPrompt(componentName, files);
+              let   docBody;
+              try {
+                docBody = await callCopilot(prompt);
+              } catch (err) {
+                console.error(`   ❌ GitHub Models API call failed: ${err.message}`);
+                continue;
+              }
+
+              const header = [
+                `# ${componentName}`,
+                '',
+                `> **Last Updated**: ${timestamp}  `,
+                `> **Updated By**: Automated Workflow – [Run #${GITHUB_RUN_ID}](${runUrl})  `,
+                `> **Triggered By**: ${GITHUB_ACTOR}`,
+                '',
+                '---',
+                '',
+              ].join('\n');
+
+              fs.writeFileSync(wikiFilePath, header + docBody);
+              console.log(`   ✅ ${wikiFilePath} written.`);
+              generatedPages.push({ componentName, wikiPageName, status: pageExists ? 'updated' : 'created' });
+            }
+
+            // ── Update / create the Components Index page ───────────────────────
+            const indexPath = path.join(wikiDir, 'Components.md');
+            const allWikiPages = fs.readdirSync(wikiDir)
+              .filter(f => f.startsWith('Component-') && f.endsWith('.md'))
+              .map(f => f.replace('.md', ''));
+
+            const indexRows = allWikiPages
+              .sort()
+              .map(p => {
+                const compName = p.replace('Component-', '');
+                const info     = generatedPages.find(g => g.componentName === compName);
+                const badge    = info ? (info.status === 'created' ? ' 🆕' : info.status === 'updated' ? ' 🔄' : '') : '';
+                return `| [[${compName}|${p}]] | \`mood-tracker/client/src/components/${compName}/\` |${badge} |`;
+              })
+              .join('\n');
+
+            const indexContent = [
+              '# Components',
+              '',
+              `> **Last Updated**: ${timestamp}  `,
+              `> **Workflow Run**: [Run #${GITHUB_RUN_ID}](${runUrl})`,
+              '',
+              '---',
+              '',
+              'This page is the index of all React components in the Mood Tracker application.',
+              'Each row links to a dedicated wiki page with full documentation auto-generated from source code.',
+              '',
+              '| Component | Source Path | Status |',
+              '|-----------|-------------|--------|',
+              indexRows,
+              '',
+              '---',
+              '',
+              '🆕 = new page created this run &nbsp;&nbsp; 🔄 = updated this run',
+            ].join('\n');
+
+            fs.writeFileSync(indexPath, indexContent);
+            console.log(`\n📄 Components index updated: ${indexPath}`);
+
+            // Summary to stdout for the next step
+            console.log('\n::SUMMARY_START::');
+            console.log(JSON.stringify(generatedPages));
+            console.log('::SUMMARY_END::');
+          }
+
+          main().catch(err => {
+            console.error('Fatal:', err);
+            process.exit(1);
+          });
+          NODESCRIPT
+
+          node /tmp/generate-docs.js
+
+      # ─────────────────────────────────────────────
+      # STEP 4 – Commit & push wiki
+      # ─────────────────────────────────────────────
+      - name: Commit and push wiki changes
         run: |
           cd wiki-temp
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
+
           git add -A
-          
-          # Create descriptive commit message
-          COMMIT_MSG="docs: Update wiki documentation from code analysis"
-          if [ "${{ github.event_name }}" == "push" ]; then
-            COMMIT_MSG="${COMMIT_MSG} - Changes from: ${{ github.event.head_commit.message }}"
+
+          CHANGED="${{ steps.discover.outputs.changed_components }}"
+          if [ -n "$CHANGED" ]; then
+            COMMIT_MSG="docs: Update wiki for changed components: $CHANGED"
           else
-            COMMIT_MSG="${COMMIT_MSG} - Manual trigger by ${{ github.actor }}"
+            COMMIT_MSG="docs: Update wiki – manual trigger by ${{ github.actor }}"
           fi
-          
+
           if git diff --cached --quiet; then
-            echo "✅ No changes detected - documentation already up to date"
+            echo "✅ No wiki changes – documentation already up to date."
           else
             git commit -m "$COMMIT_MSG [skip ci]"
             git push
             echo "✅ Wiki updated successfully!"
-            echo "📄 Updated pages:"
-            echo "  - API-Endpoints.md"
-            echo "  - Components.md"
-            echo "  - Architecture.md"
-            echo "  - Data-Models.md"
           fi
 
-      - name: Workflow summary
+      # ─────────────────────────────────────────────
+      # STEP 5 – Job summary
+      # ─────────────────────────────────────────────
+      - name: Write job summary
         run: |
-          echo "## 📚 Documentation Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 📚 Wiki Documentation Update" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: main" >> $GITHUB_STEP_SUMMARY
-          echo "- **Components Analyzed**: ${{ steps.analyze.outputs.COMPONENT_COUNT }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | Manual dispatch by **${{ github.actor }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Components changed in last commit | \`${{ steps.discover.outputs.changed_components || 'none' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Updated Wiki Pages" >> $GITHUB_STEP_SUMMARY
-          echo "- [[API Endpoints & Data Fetching|API-Endpoints]]" >> $GITHUB_STEP_SUMMARY
-          echo "- [[Components|Components]]" >> $GITHUB_STEP_SUMMARY
-          echo "- [[Architecture|Architecture]]" >> $GITHUB_STEP_SUMMARY
-          echo "- [[Data Models|Data-Models]]" >> $GITHUB_STEP_SUMMARY
+          echo "### What happened" >> $GITHUB_STEP_SUMMARY
+          echo "- Each folder under \`mood-tracker/client/src/components/\` gets its own wiki page" >> $GITHUB_STEP_SUMMARY
+          echo "- Pages for components **not** changed in the last commit were skipped" >> $GITHUB_STEP_SUMMARY
+          echo "- Pages for **new** component folders were created" >> $GITHUB_STEP_SUMMARY
+          echo "- The **Components** index page was refreshed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View Run Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "[View Wiki](${{ github.server_url }}/${{ github.repository }}/wiki)" >> $GITHUB_STEP_SUMMARY
