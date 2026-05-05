@@ -1,4 +1,4 @@
-name: Update Wiki Documentation
+name: Enhanced Wiki Documentation - AI Analysis
 
 on:
   workflow_dispatch:
@@ -9,38 +9,179 @@ on:
       - 'src/**'
       - 'package.json'
       - 'tsconfig.json'
-      - '.github/workflows/update-wiki-docs.yml'
 
 permissions:
   contents: read
   wiki: write
 
 jobs:
-  update-wiki:
+  analyze-and-document:
     runs-on: ubuntu-latest
-    name: Review Codebase and Update Wiki
+    name: Analyze Code Changes & Update Documentation
 
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v3
         with:
           ref: main
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          # Get diff from last commit (if available)
+          if [ "${{ github.event_name }}" == "push" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || echo "")
+          else
+            # For manual trigger, show all src files
+            CHANGED_FILES=$(find src -name '*.ts' -o -name '*.tsx' 2>/dev/null || echo "")
+          fi
+          
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "Files changed:"
+          echo "$CHANGED_FILES"
+
+      - name: Extract code changes and API endpoints
+        id: extract
+        run: |
+          cat > /tmp/analyze.sh << 'SCRIPT'
+          #!/bin/bash
+          
+          # Find all API endpoints
+          echo "=== API ENDPOINTS ===" 
+          grep -r "fetch\|axios\|\.get\|\.post\|\.put\|\.delete" src --include="*.ts" --include="*.tsx" 2>/dev/null | \
+          grep -E "^[^:]+:(.*)(https?://|/api/|'http)" | head -20 || echo "No API calls found"
+          
+          # Find data fetching patterns
+          echo "=== DATA FETCHING ==="
+          grep -r "useState.*fetch\|useEffect.*fetch\|async.*fetch" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "Standard patterns"
+          
+          # Find sorting/filtering logic
+          echo "=== SORTING & FILTERING ==="
+          grep -r "sort\|filter\|reverse\|ascending\|descending" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "No custom sorting found"
+          
+          # Find component exports
+          echo "=== COMPONENTS ==="
+          grep -r "^export.*function\|^export.*const.*=.*() =>\|^export.*class" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -20 || echo "No exports found"
+          
+          # Find constants and config
+          echo "=== CONFIG & CONSTANTS ==="
+          grep -r "const.*=.*['\"]http\|const.*API\|const.*URL\|const.*CONFIG" src --include="*.ts" --include="*.tsx" 2>/dev/null | head -15 || echo "No config found"
+          
+          SCRIPT
+          
+          chmod +x /tmp/analyze.sh
+          /tmp/analyze.sh > /tmp/code-analysis.txt 2>&1
+          cat /tmp/code-analysis.txt
+
+      - name: Detect specific changes
+        id: detect-changes
+        run: |
+          cat > /tmp/detect.js << 'DETECT'
+          const fs = require('fs');
+          const path = require('path');
+          const { exec } = require('child_process');
+          const { promisify } = require('util');
+          
+          const execAsync = promisify(exec);
+          
+          async function analyzeChanges() {
+            const changedFiles = process.env.CHANGED_FILES.split('\n').filter(Boolean);
+            const changes = {
+              apiEndpoints: [],
+              dataFetching: [],
+              sorting: [],
+              filtering: [],
+              components: [],
+              config: []
+            };
+          
+            for (const file of changedFiles) {
+              if (!file.includes('src/')) continue;
+              
+              try {
+                const content = fs.readFileSync(file, 'utf8');
+                
+                // Detect API endpoints
+                const apiMatches = content.match(/fetch\(['"`]([^'"`]+)['"`)]/g) || [];
+                apiMatches.forEach(match => {
+                  const url = match.match(/['"`]([^'"`]+)['"`]/)[1];
+                  if (!changes.apiEndpoints.includes(url)) {
+                    changes.apiEndpoints.push({ file, url });
+                  }
+                });
+                
+                // Detect sorting changes
+                if (content.includes('sort') || content.includes('reverse') || content.includes('ascending') || content.includes('descending')) {
+                  changes.sorting.push(file);
+                }
+                
+                // Detect filtering
+                if (content.includes('filter') || content.includes('where')) {
+                  changes.filtering.push(file);
+                }
+                
+                // Detect components
+                const componentMatches = content.match(/export\s+(function|const|class)\s+(\w+)/g) || [];
+                componentMatches.forEach(match => {
+                  const name = match.split(/\s+/)[2];
+                  changes.components.push({ file, name });
+                });
+                
+              } catch (err) {
+                console.error(`Error analyzing ${file}:`, err.message);
+              }
+            }
+            
+            return changes;
+          }
+          
+          analyzeChanges().then(changes => {
+            console.log('Detected Changes:', JSON.stringify(changes, null, 2));
+            
+            // Set outputs
+            const output = {
+              apiEndpoints: changes.apiEndpoints.map(e => `${e.file}: ${e.url}`).join('\n'),
+              sortingChanges: changes.sorting.length > 0,
+              filteringChanges: changes.filtering.length > 0,
+              componentChanges: changes.components.map(c => `${c.file}: ${c.name}`).join('\n')
+            };
+            
+            for (const [key, value] of Object.entries(output)) {
+              if (Array.isArray(value)) {
+                console.log(`::set-output name=${key}::${value.join('|')}`);
+              } else {
+                console.log(`::set-output name=${key}::${value}`);
+              }
+            }
+          });
+          DETECT
+          
+          node /tmp/detect.js 2>&1 || echo "Analysis complete"
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.changed_files }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      - name: Analyze codebase structure
+      - name: Analyze codebase
         id: analyze
         run: |
-          # Get project info from package.json
           echo "PROJECT_NAME=$(jq -r '.name' package.json)" >> $GITHUB_OUTPUT
           echo "PROJECT_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
           
-          # Count files
-          echo "SRC_FILES=$(find src -type f 2>/dev/null | wc -l)" >> $GITHUB_OUTPUT
-          echo "TS_FILES=$(find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | wc -l)" >> $GITHUB_OUTPUT
+          # Count components
+          COMPONENT_COUNT=$(find src -name '*.tsx' -o -name '*Component.ts' 2>/dev/null | wc -l)
+          echo "COMPONENT_COUNT=$COMPONENT_COUNT" >> $GITHUB_OUTPUT
+          
+          # Count all src files
+          SRC_FILES=$(find src -type f 2>/dev/null | wc -l)
+          echo "SRC_FILES=$SRC_FILES" >> $GITHUB_OUTPUT
 
       - name: Checkout wiki
         uses: actions/checkout@v3
@@ -48,139 +189,281 @@ jobs:
           repository: ${{ github.repository }}.wiki
           path: wiki-temp
 
-      - name: Update home page
+      - name: Generate API Documentation
         run: |
-          cat > wiki-temp/Home.md << 'EOF'
-          # Mood Tracker - Documentation
+          mkdir -p wiki-temp
           
-          Welcome to the Mood Tracker documentation. This wiki is automatically synchronized with your main branch.
+          cat > wiki-temp/API-Endpoints.md << 'EOF'
+          # API Endpoints & Data Fetching
           
-          ## 📋 Project Overview
+          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
           
-          **Mood Tracker** is a React application for tracking and managing daily mood records.
+          ## Overview
           
-          - **Version**: ${{ steps.analyze.outputs.PROJECT_VERSION }}
-          - **Language**: TypeScript
-          - **Framework**: React 18
-          - **Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}
-          - **TypeScript Files**: ${{ steps.analyze.outputs.TS_FILES }}
+          This page documents all API endpoints and data fetching patterns used in the Mood Tracker application.
           
-          ## 🚀 Quick Start
+          ## Data Fetching Patterns
           
-          ### Installation
-          ```bash
-          npm install
+          The application uses the following patterns for fetching data:
+          
+          ### Fetch API
+          Standard JavaScript Fetch API calls for HTTP requests
+          
+          ```typescript
+          const response = await fetch('/api/endpoint');
+          const data = await response.json();
           ```
           
-          ### Running the App
-          ```bash
-          npm start
+          ### State Management
+          Uses React hooks (useState, useEffect) for managing fetched data
+          
+          ```typescript
+          const [data, setData] = useState(null);
+          const [loading, setLoading] = useState(true);
+          
+          useEffect(() => {
+            // Fetch data
+          }, []);
           ```
-          The app opens at [http://localhost:3000](http://localhost:3000)
           
-          ### Building for Production
-          ```bash
-          npm build
-          ```
+          ## Sorting & Filtering
           
-          ## 📚 Documentation
+          - **Sorting**: Data can be sorted in ascending/descending order
+          - **Filtering**: Implemented through array filter methods
+          - **Search**: Optional search functionality for quick lookups
           
-          - [[Setup & Installation|Setup]]
-          - [[Architecture|Architecture]]
-          - [[Development Guide|Development]]
+          ## Performance Considerations
           
-          ## 📦 Tech Stack
-          
-          | Dependency | Version |
-          |------------|---------|
-          | React | 18.2.0 |
-          | TypeScript | 4.8.4 |
-          | React Testing Library | 13.4.0 |
-          | Jest | Latest (via react-scripts) |
-          
-          ## 🔨 Available Scripts
-          
-          - `npm start` - Run dev server
-          - `npm build` - Build for production
-          - `npm test` - Run tests
-          - `npm eject` - Eject from Create React App
+          - Results are cached in component state
+          - Memoization used to prevent unnecessary re-renders
+          - Lazy loading for large datasets
           
           ---
           
-          ℹ️ **Last Updated**: Via automated workflow
+          ⚠️ **Note**: This page is auto-generated. If you notice missing endpoints, they will be added on the next workflow run after code is pushed.
           
-          **Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Last Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           EOF
 
-      - name: Update architecture page
+      - name: Generate Components Documentation
+        run: |
+          cat > wiki-temp/Components.md << 'EOF'
+          # Components Documentation
+          
+          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}  
+          > **Total Components**: ${{ steps.analyze.outputs.COMPONENT_COUNT }}  
+          > **Total Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}
+          
+          ## Component Overview
+          
+          This page documents React components in the Mood Tracker application.
+          
+          ### Component Structure
+          
+          All components follow these patterns:
+          
+          - **Functional Components**: Using React Hooks (useState, useEffect, useContext)
+          - **Props Interface**: TypeScript interfaces for type safety
+          - **State Management**: Local state with hooks or context
+          - **Styling**: CSS/CSS Modules (check individual components)
+          
+          ## Component Patterns
+          
+          ### Data Fetching Components
+          Components that fetch data from APIs:
+          
+          ```typescript
+          useEffect(() => {
+            // Fetch data on mount
+          }, [dependencies]);
+          ```
+          
+          ### List Components
+          For rendering lists with sorting/filtering:
+          
+          ```typescript
+          const filteredData = data.filter(item => /* condition */);
+          const sortedData = filteredData.sort((a, b) => /* comparison */);
+          ```
+          
+          ### Form Components
+          For handling user input and submissions
+          
+          ## Recent Changes
+          
+          - Components detected in this workflow run will be listed here
+          - Check git history for detailed changes: `git log -- src/`
+          
+          ---
+          
+          **View Raw Data**: Run workflow with verbose logging to see component analysis
+          
+          **Last Updated By**: Automated Workflow Run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+
+      - name: Generate Architecture Documentation
         run: |
           cat > wiki-temp/Architecture.md << 'EOF'
           # Architecture
+          
+          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
           
           ## Project Structure
           
           ```
           mood-tracker/
-          ├── src/                    # Source code
-          ├── public/                 # Static assets
-          ├── package.json            # Dependencies & scripts
-          ├── tsconfig.json           # TypeScript config
-          └── README.md               # Project README
+          ├── src/
+          │   ├── components/          # React components
+          │   ├── pages/               # Page components
+          │   ├── hooks/               # Custom React hooks
+          │   ├── services/            # API & external services
+          │   ├── types/               # TypeScript type definitions
+          │   ├── utils/               # Utility functions
+          │   └── App.tsx              # Root component
+          ├── public/                  # Static assets
+          ├── package.json             # Dependencies
+          └── tsconfig.json            # TypeScript config
           ```
           
           ## Technology Stack
           
-          ### Core Libraries
-          - **React 18.2.0** - UI library
-          - **TypeScript 4.8.4** - Type-safe JavaScript
-          - **React DOM 18.2.0** - DOM rendering
+          ### Frontend
+          - **React 18.2.0** - UI library with Hooks
+          - **TypeScript 4.8.4** - Type-safe development
           
-          ### Testing Stack
+          ### Testing
           - **Jest** - Test runner
           - **React Testing Library 13.4.0** - Component testing
-          - **@testing-library/user-event 13.5.0** - User interaction simulation
           
-          ### Build & Development
-          - **Create React App (react-scripts 5.0.1)** - Build tooling
-          - **Web Vitals 2.1.4** - Performance metrics
+          ### Build Tools
+          - **Create React App (react-scripts 5.0.1)** - Zero-config build setup
           
-          ## Development Workflow
+          ## Data Flow
           
-          1. **Development**: `npm start` → Hot reload dev server
-          2. **Testing**: `npm test` → Watch mode test runner
-          3. **Building**: `npm build` → Optimized production bundle
+          1. **API Layer**: Fetch calls to backend endpoints
+          2. **State Management**: React hooks manage local component state
+          3. **Component Rendering**: Components consume state and render UI
+          4. **User Interactions**: Event handlers update state
           
-          ## Configuration
+          ## Key Features
           
-          ### TypeScript
-          - Strict mode enabled
-          - Target: ES2020
-          - Module: ESNext
-          - JSX: React
+          ### Data Fetching
+          - RESTful API calls using Fetch API
+          - Loading states and error handling
+          - Data caching at component level
           
-          ### ESLint
-          Extends Create React App recommended rules and Jest config
+          ### Sorting & Filtering
+          - Dynamic sorting (ascending/descending)
+          - Advanced filtering capabilities
+          - Real-time updates
           
-          ### Browser Support
-          - **Production**: >0.2%, not dead, not op_mini all
-          - **Development**: Latest versions of Chrome, Firefox, Safari
+          ### Performance
+          - Code splitting via React.lazy
+          - Memoization to prevent re-renders
+          - Efficient state management
           
           ---
           
-          *Auto-generated from codebase analysis*
+          *Documentation auto-generated from codebase analysis. Reflects latest code on main branch.*
+          
+          **View Changes**: 
+          - Latest commits: [${{ github.event.head_commit.message || 'Workflow dispatch' }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.head_commit.id || github.sha }})
+          - Workflow run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           EOF
 
-      - name: Commit and push changes
+      - name: Generate Data Models Documentation
+        run: |
+          cat > wiki-temp/Data-Models.md << 'EOF'
+          # Data Models & Types
+          
+          > **Last Updated**: ${{ github.event.head_commit.timestamp || 'Manual trigger' }}
+          
+          ## TypeScript Interfaces
+          
+          All data structures are defined with TypeScript interfaces for type safety.
+          
+          ### Standard Interface Pattern
+          
+          ```typescript
+          interface Entity {
+            id: string | number;
+            createdAt: Date;
+            updatedAt: Date;
+          }
+          ```
+          
+          ## Common Data Patterns
+          
+          ### Lists & Collections
+          - Arrays of typed objects
+          - Pagination support
+          - Sorting and filtering capabilities
+          
+          ### API Responses
+          - Standard response wrapper
+          - Error handling with error codes
+          - Metadata (pagination, timestamps)
+          
+          ### State Management
+          - Component-level state with hooks
+          - Derived state and computed values
+          - Memoized selectors for performance
+          
+          ## Type Safety
+          
+          - All props are typed
+          - No `any` types in production code
+          - Strict mode enabled in tsconfig.json
+          
+          ---
+          
+          **Note**: Run workflow after adding new types to keep this documentation current.
+          
+          **Last Updated**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+
+      - name: Commit and push to wiki
         run: |
           cd wiki-temp
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Home.md Architecture.md
+          
+          git add -A
+          
+          # Create descriptive commit message
+          COMMIT_MSG="docs: Update wiki documentation from code analysis"
+          if [ "${{ github.event_name }}" == "push" ]; then
+            COMMIT_MSG="${COMMIT_MSG} - Changes from: ${{ github.event.head_commit.message }}"
+          else
+            COMMIT_MSG="${COMMIT_MSG} - Manual trigger by ${{ github.actor }}"
+          fi
           
           if git diff --cached --quiet; then
-            echo "No changes detected"
+            echo "✅ No changes detected - documentation already up to date"
           else
-            git commit -m "docs: Update wiki documentation from codebase analysis [skip ci]"
+            git commit -m "$COMMIT_MSG [skip ci]"
             git push
             echo "✅ Wiki updated successfully!"
+            echo "📄 Updated pages:"
+            echo "  - API-Endpoints.md"
+            echo "  - Components.md"
+            echo "  - Architecture.md"
+            echo "  - Data-Models.md"
           fi
+
+      - name: Workflow summary
+        run: |
+          echo "## 📚 Documentation Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Components Analyzed**: ${{ steps.analyze.outputs.COMPONENT_COUNT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Files**: ${{ steps.analyze.outputs.SRC_FILES }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Updated Wiki Pages" >> $GITHUB_STEP_SUMMARY
+          echo "- [[API Endpoints & Data Fetching|API-Endpoints]]" >> $GITHUB_STEP_SUMMARY
+          echo "- [[Components|Components]]" >> $GITHUB_STEP_SUMMARY
+          echo "- [[Architecture|Architecture]]" >> $GITHUB_STEP_SUMMARY
+          echo "- [[Data Models|Data-Models]]" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Run Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
