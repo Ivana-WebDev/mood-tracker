@@ -11,8 +11,7 @@ on:
       - 'tsconfig.json'
 
 permissions:
-  contents: read
-  wiki: write
+  contents: write
 
 jobs:
   analyze-and-document:
