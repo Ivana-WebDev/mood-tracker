@@ -1,0 +1,466 @@
+name: Wiki Documentation - Initial Setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  models: read     # required to call the GitHub Models / Copilot API with GITHUB_TOKEN
+
+jobs:
+  initialize-wiki:
+    runs-on: ubuntu-latest
+    name: Generate Full Wiki Documentation from Scratch
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # ─────────────────────────────────────────────
+      # STEP 1 – Checkout wiki & wipe managed pages
+      # ─────────────────────────────────────────────
+      - name: Checkout wiki and delete existing managed pages
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki-temp
+
+      - name: Delete existing managed pages
+        run: |
+          cd wiki-temp
+
+          # Pages this workflow owns – delete so they are fully regenerated
+          MANAGED_PAGES=(
+            "Home.md"
+            "Architecture.md"
+            "Components.md"
+          )
+
+          for page in "${MANAGED_PAGES[@]}"; do
+            if [ -f "$page" ]; then
+              rm "$page"
+              echo "🗑  Deleted $page"
+            fi
+          done
+
+          # Delete all per-component pages (Component-*.md)
+          for f in Component-*.md; do
+            [ -f "$f" ] || continue
+            rm "$f"
+            echo "🗑  Deleted $f"
+          done
+
+          echo "✅ Clean slate ready."
+
+      # ─────────────────────────────────────────────
+      # STEP 2 – Collect codebase context
+      # ─────────────────────────────────────────────
+      - name: Collect project metadata
+        id: meta
+        run: |
+          COMPONENTS_ROOT="mood-tracker/client/src/components"
+
+          # Discover component folders
+          COMPONENT_FOLDERS=$(find "$COMPONENTS_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+          FOLDERS_B64=$(echo "$COMPONENT_FOLDERS" | base64 -w 0)
+
+          echo "component_folders_b64=$FOLDERS_B64"    >> $GITHUB_OUTPUT
+          echo "components_root=$COMPONENTS_ROOT"       >> $GITHUB_OUTPUT
+
+          # Package metadata
+          PKG_NAME=$(jq -r '.name    // "mood-tracker"' mood-tracker/client/package.json 2>/dev/null || echo "mood-tracker")
+          PKG_VER=$(jq  -r '.version // "0.0.0"'        mood-tracker/client/package.json 2>/dev/null || echo "0.0.0")
+          PKG_DESC=$(jq -r '.description // ""'          mood-tracker/client/package.json 2>/dev/null || echo "")
+
+          echo "pkg_name=$PKG_NAME"   >> $GITHUB_OUTPUT
+          echo "pkg_ver=$PKG_VER"     >> $GITHUB_OUTPUT
+          echo "pkg_desc=$PKG_DESC"   >> $GITHUB_OUTPUT
+
+          echo "Found component folders:"
+          echo "$COMPONENT_FOLDERS"
+
+      # ─────────────────────────────────────────────
+      # STEP 3 – AI generation: all pages
+      # ─────────────────────────────────────────────
+      - name: Generate all wiki pages via GitHub Copilot (Models API)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPONENT_FOLDERS_B64: ${{ steps.meta.outputs.component_folders_b64 }}
+          COMPONENTS_ROOT: ${{ steps.meta.outputs.components_root }}
+          PKG_NAME: ${{ steps.meta.outputs.pkg_name }}
+          PKG_VER: ${{ steps.meta.outputs.pkg_ver }}
+          PKG_DESC: ${{ steps.meta.outputs.pkg_desc }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          cat > /tmp/init-wiki.js << 'NODESCRIPT'
+          const fs   = require('fs');
+          const path = require('path');
+
+          const GH_TOKEN              = process.env.GH_TOKEN;
+          const COMPONENT_FOLDERS_B64 = process.env.COMPONENT_FOLDERS_B64 || '';
+          const COMPONENTS_ROOT       = process.env.COMPONENTS_ROOT;
+          const PKG_NAME              = process.env.PKG_NAME;
+          const PKG_VER               = process.env.PKG_VER;
+          const PKG_DESC              = process.env.PKG_DESC;
+          const GITHUB_RUN_ID         = process.env.GITHUB_RUN_ID;
+          const GITHUB_SERVER_URL     = process.env.GITHUB_SERVER_URL;
+          const GITHUB_REPOSITORY     = process.env.GITHUB_REPOSITORY;
+          const GITHUB_ACTOR          = process.env.GITHUB_ACTOR;
+
+          const WIKI_DIR = 'wiki-temp';
+          const RUN_URL  = `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;
+          const TS       = new Date().toISOString();
+
+          // ── shared page footer ────────────────────────────────────────────────────
+          function footer() {
+            return [
+              '',
+              '---',
+              '',
+              `*Auto-generated by [workflow run #${GITHUB_RUN_ID}](${RUN_URL}) · triggered by @${GITHUB_ACTOR} · ${TS}*`,
+            ].join('\n');
+          }
+
+          // ── file helpers ──────────────────────────────────────────────────────────
+          function readFolderContents(folderPath) {
+            const files = {};
+            function walk(dir) {
+              let entries;
+              try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+              catch { return; }
+              for (const entry of entries) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  walk(full);
+                } else if (/\.(ts|tsx|css|scss|json)$/.test(entry.name)) {
+                  try { files[full] = fs.readFileSync(full, 'utf8'); }
+                  catch { files[full] = '(unreadable)'; }
+                }
+              }
+            }
+            walk(folderPath);
+            return files;
+          }
+
+          function readDirTree(rootPath, indent = '') {
+            let out = '';
+            let entries;
+            try { entries = fs.readdirSync(rootPath, { withFileTypes: true }); }
+            catch { return out; }
+            for (const e of entries) {
+              if (['node_modules', '.git', 'build', 'dist', 'coverage'].includes(e.name)) continue;
+              out += `${indent}${e.isDirectory() ? '📁' : '📄'} ${e.name}\n`;
+              if (e.isDirectory()) out += readDirTree(path.join(rootPath, e.name), indent + '  ');
+            }
+            return out;
+          }
+
+          // ── GitHub Models / Copilot API ───────────────────────────────────────────
+          async function callCopilot(systemPrompt, userPrompt) {
+            const resp = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GH_TOKEN}`,
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o',
+                max_tokens: 4096,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user',   content: userPrompt   },
+                ],
+              }),
+            });
+
+            if (!resp.ok) {
+              const err = await resp.text();
+              throw new Error(`GitHub Models API error ${resp.status}: ${err}`);
+            }
+
+            const data = await resp.json();
+            return data.choices[0].message.content;
+          }
+
+          // ── PROMPT BUILDERS ───────────────────────────────────────────────────────
+
+          function buildHomePrompt(dirTree, packageJsonRaw, componentNames) {
+            return `You are writing the Home page for the GitHub Wiki of a project called "${PKG_NAME}" (v${PKG_VER}).
+          ${PKG_DESC ? `Project description from package.json: "${PKG_DESC}"` : ''}
+
+          Here is the full client directory tree:
+          \`\`\`
+          ${dirTree}
+          \`\`\`
+
+          Here is the client package.json:
+          \`\`\`json
+          ${packageJsonRaw}
+          \`\`\`
+
+          The application has these top-level components: ${componentNames.join(', ')}.
+
+          Write a comprehensive Home wiki page in Markdown. Do NOT add an H1 title (the wiki supplies it).
+          Include these sections (## headings):
+          1. **About** – what the application does, who it is for, its core purpose.
+          2. **Tech Stack** – table of all key dependencies from package.json with version and purpose.
+          3. **Project Structure** – annotated directory tree explaining what each major folder is for.
+          4. **Getting Started** – prerequisites, install steps, how to run locally, how to run tests.
+          5. **Key Features** – bullet list of the main features/capabilities inferred from the codebase.
+          6. **Wiki Navigation** – links to: [[Architecture]], [[Components]], and each component page listed as [[ComponentName|Component-ComponentName]].
+
+          Be specific and accurate. Do not invent features not visible in the code.`;
+          }
+
+          function buildArchitecturePrompt(dirTree, packageJsonRaw, componentNames, componentSummaries) {
+            const summaryBlock = componentSummaries
+              .map(({ name, summary }) => `### ${name}\n${summary}`)
+              .join('\n\n');
+
+            return `You are writing the Architecture wiki page for "${PKG_NAME}" (v${PKG_VER}).
+
+          Directory tree:
+          \`\`\`
+          ${dirTree}
+          \`\`\`
+
+          package.json:
+          \`\`\`json
+          ${packageJsonRaw}
+          \`\`\`
+
+          Component summaries (one per component folder):
+          ${summaryBlock}
+
+          Write a thorough Architecture wiki page in Markdown. Do NOT add an H1 title.
+          Include these sections (## headings):
+          1. **Overview** – high-level description of the system architecture and design philosophy.
+          2. **Technology Stack** – table of runtime dependencies with version, category (UI / state / routing / etc.) and purpose.
+          3. **Folder Structure** – explain every top-level folder's responsibility.
+          4. **Component Architecture** – describe how components are organised, naming conventions, and how they relate to each other. Include a Mermaid component dependency diagram where it makes sense.
+          5. **Data Flow** – explain how data moves through the app: API calls → state → components → user interactions → state updates.
+          6. **State Management** – describe the state strategy (local state, context, external library, etc.).
+          7. **Routing** – describe routing setup if present.
+          8. **API Integration** – summarise how the client communicates with any backend or external APIs.
+          9. **Component Index** – table with columns: Component | Source Path | Responsibility, linking each to its wiki page as [[ComponentName|Component-ComponentName]].
+
+          Be specific. Use Mermaid diagrams and tables wherever they add clarity.`;
+          }
+
+          function buildComponentPrompt(componentName, files) {
+            const fileList = Object.entries(files)
+              .map(([p, c]) => `### File: ${p}\n\`\`\`\n${c.slice(0, 6000)}\n\`\`\``)
+              .join('\n\n');
+
+            return `Analyse the source code below for the React component "${componentName}" and write a GitHub Wiki page in Markdown.
+          Do NOT add an H1 title. Include these sections (## headings):
+          1. **Overview** – one paragraph: what this component does and its role in the app.
+          2. **File Structure** – table: filename | role.
+          3. **Props & Interfaces** – every exported TS interface/type: field | type | description.
+          4. **State & Hooks** – every useState/useReducer/custom hook: name | type | purpose | when it updates.
+          5. **Key Logic** – important business logic, algorithms, useEffect bodies, event handlers.
+          6. **API / Data Fetching** – every fetch/axios call: method | endpoint | request shape | response shape | how data is used.
+          7. **Rendered Output** – UI structure, conditional rendering rules, key CSS classes.
+          8. **Dependencies** – external packages imported and why.
+          9. **Usage Example** – realistic JSX snippet demonstrating typical usage.
+
+          Be specific and accurate. Use tables and code blocks liberally.
+
+          --- SOURCE FILES ---
+          ${fileList}`;
+          }
+
+          // ── MAIN ──────────────────────────────────────────────────────────────────
+          async function main() {
+            // Decode folder list
+            const foldersRaw     = COMPONENT_FOLDERS_B64
+              ? Buffer.from(COMPONENT_FOLDERS_B64, 'base64').toString('utf8').trim()
+              : '';
+            const componentFolders = foldersRaw.split('\n').filter(Boolean);
+            const componentNames   = componentFolders.map(f => path.basename(f));
+
+            console.log(`\n📦 Project : ${PKG_NAME} v${PKG_VER}`);
+            console.log(`📁 Components (${componentFolders.length}): ${componentNames.join(', ')}\n`);
+
+            // Shared context
+            const clientRoot     = 'mood-tracker/client';
+            const dirTree        = readDirTree(clientRoot);
+            let   packageJsonRaw = '{}';
+            try { packageJsonRaw = fs.readFileSync(path.join(clientRoot, 'package.json'), 'utf8'); }
+            catch { /* no package.json found */ }
+
+            const SYSTEM = 'You are a senior TypeScript/React developer writing GitHub Wiki documentation. Write in clear technical prose. Use Markdown tables and fenced code blocks liberally. Never invent information not visible in the provided code.';
+
+            // ── 1. Per-component pages (generated first so Architecture can reference summaries)
+            const componentSummaries = [];
+
+            for (const folderPath of componentFolders) {
+              const componentName = path.basename(folderPath);
+              const wikiFile      = path.join(WIKI_DIR, `Component-${componentName}.md`);
+
+              console.log(`🔍 Generating component page: ${componentName}`);
+              const files = readFolderContents(folderPath);
+
+              if (Object.keys(files).length === 0) {
+                console.log(`   ⚠️  No source files found – skipping.`);
+                continue;
+              }
+
+              const prompt = buildComponentPrompt(componentName, files);
+              let body;
+              try {
+                body = await callCopilot(SYSTEM, prompt);
+              } catch (err) {
+                console.error(`   ❌ API error: ${err.message}`);
+                continue;
+              }
+
+              const header = [
+                `# ${componentName}`,
+                '',
+                `> **Generated**: ${TS}  `,
+                `> **Source**: \`${folderPath}\`  `,
+                `> **Run**: [#${GITHUB_RUN_ID}](${RUN_URL})`,
+                '',
+                '---',
+                '',
+              ].join('\n');
+
+              fs.writeFileSync(wikiFile, header + body + footer());
+              console.log(`   ✅ Written: ${wikiFile}`);
+
+              // Collect a one-line summary for the Architecture page
+              const firstLine = body.split('\n').find(l => l.trim() && !l.startsWith('#')) || '';
+              componentSummaries.push({ name: componentName, summary: firstLine.slice(0, 300) });
+            }
+
+            // ── 2. Home page
+            console.log('\n🏠 Generating Home page...');
+            try {
+              const homeBody = await callCopilot(
+                SYSTEM,
+                buildHomePrompt(dirTree, packageJsonRaw, componentNames)
+              );
+              const homeHeader = [
+                '# Home',
+                '',
+                `> **Generated**: ${TS} · [Run #${GITHUB_RUN_ID}](${RUN_URL})`,
+                '',
+                '---',
+                '',
+              ].join('\n');
+              fs.writeFileSync(path.join(WIKI_DIR, 'Home.md'), homeHeader + homeBody + footer());
+              console.log('   ✅ Written: wiki-temp/Home.md');
+            } catch (err) {
+              console.error(`   ❌ Home page failed: ${err.message}`);
+            }
+
+            // ── 3. Architecture page
+            console.log('\n🏗  Generating Architecture page...');
+            try {
+              const archBody = await callCopilot(
+                SYSTEM,
+                buildArchitecturePrompt(dirTree, packageJsonRaw, componentNames, componentSummaries)
+              );
+              const archHeader = [
+                '# Architecture',
+                '',
+                `> **Generated**: ${TS} · [Run #${GITHUB_RUN_ID}](${RUN_URL})`,
+                '',
+                '---',
+                '',
+              ].join('\n');
+              fs.writeFileSync(path.join(WIKI_DIR, 'Architecture.md'), archHeader + archBody + footer());
+              console.log('   ✅ Written: wiki-temp/Architecture.md');
+            } catch (err) {
+              console.error(`   ❌ Architecture page failed: ${err.message}`);
+            }
+
+            // ── 4. Components index page
+            console.log('\n📋 Generating Components index...');
+            const compRows = componentNames
+              .map(n => `| [[${n}\\|Component-${n}]] | \`${COMPONENTS_ROOT}/${n}/\` |`)
+              .join('\n');
+
+            const compIndex = [
+              '# Components',
+              '',
+              `> **Generated**: ${TS} · [Run #${GITHUB_RUN_ID}](${RUN_URL})`,
+              '',
+              '---',
+              '',
+              `Index of all React components in **${PKG_NAME}**.`,
+              'Each row links to a dedicated wiki page generated from source code.',
+              '',
+              '| Component | Source Path |',
+              '|-----------|-------------|',
+              compRows,
+              footer(),
+            ].join('\n');
+
+            fs.writeFileSync(path.join(WIKI_DIR, 'Components.md'), compIndex);
+            console.log('   ✅ Written: wiki-temp/Components.md');
+
+            console.log('\n🎉 All pages generated successfully.');
+          }
+
+          main().catch(err => {
+            console.error('Fatal error:', err);
+            process.exit(1);
+          });
+          NODESCRIPT
+
+          node /tmp/init-wiki.js
+
+      # ─────────────────────────────────────────────
+      # STEP 4 – Commit & push wiki
+      # ─────────────────────────────────────────────
+      - name: Commit and push wiki
+        run: |
+          cd wiki-temp
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "✅ Nothing to commit – wiki already up to date."
+          else
+            git commit -m "docs: Initial wiki generation from codebase by @${{ github.actor }} [skip ci]"
+            git push
+            echo "✅ Wiki pushed successfully."
+          fi
+
+      # ─────────────────────────────────────────────
+      # STEP 5 – Job summary
+      # ─────────────────────────────────────────────
+      - name: Write job summary
+        run: |
+          echo "## 📚 Wiki Initial Setup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | **${{ github.actor }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Project | ${{ steps.meta.outputs.pkg_name }} v${{ steps.meta.outputs.pkg_ver }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pages created" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏠 **Home** – project overview, tech stack, getting started" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏗 **Architecture** – system design, data flow, component map" >> $GITHUB_STEP_SUMMARY
+          echo "- 📋 **Components** – index of all component pages" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧩 **Component-\\*** – one page per folder in \`mood-tracker/client/src/components/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> ⚠️ Existing pages with the same names were **deleted and regenerated** from scratch." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Wiki](${{ github.server_url }}/${{ github.repository }}/wiki)" >> $GITHUB_STEP_SUMMARY
