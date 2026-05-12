@@ -36,14 +36,13 @@ jobs:
           path: wiki-repo
         continue-on-error: true
 
-      - name: Initialise wiki repo if missing
+      - name: Initialize wiki repo if missing
         run: |
           if [ ! -d "wiki-repo/.git" ]; then
             mkdir -p wiki-repo
             cd wiki-repo
             git init
-            git remote add origin \
-              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
+            git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
             echo "# Wiki" > Home.md
             git add Home.md
             git config user.name "github-actions[bot]"
@@ -53,144 +52,30 @@ jobs:
           fi
 
       - name: Wipe existing wiki pages
-        run: |
-          cd wiki-repo
-          find . -maxdepth 1 -name "*.md" -delete
-          echo "Wiki cleared."
+        run: find wiki-repo -maxdepth 1 -name "*.md" -delete
 
-      - name: Generate wiki pages via GitHub Models
+      - name: Generate wiki pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
-          SOURCE_BRANCH: ${{ github.event.inputs.branch }}
-          ACTOR: ${{ github.actor }}
+        run: python3 .github/scripts/generate_wiki.py
+
+      - name: Copy pages to wiki repo
+        run: cp /tmp/wiki-pages/*.md wiki-repo/
+
+      - name: Commit and push wiki
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          python3 - <<'PYTHON'
-          import os
-          import json
-          import pathlib
-          import urllib.request
-          import textwrap
+          cd wiki-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: rebuild wiki from ${{ github.event.inputs.branch }} @ ${{ github.sha }}" || echo "No changes"
+          git push origin HEAD:master
 
-          MODEL = "gpt-4.1"
-          API_URL = "https://models.github.ai/inference/chat/completions"
-
-          def call_model(system_prompt: str, user_prompt: str) -> str:
-              payload = {
-                  "model": MODEL,
-                  "messages": [
-                      {"role": "system", "content": system_prompt},
-                      {"role": "user", "content": user_prompt}
-                  ],
-                  "temperature": 0.2,
-                  "max_tokens": 4000
-              }
-
-              req = urllib.request.Request(
-                  API_URL,
-                  data=json.dumps(payload).encode("utf-8"),
-                  headers={
-                      "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-                      "Content-Type": "application/json"
-                  },
-                  method="POST"
-              )
-
-              with urllib.request.urlopen(req, timeout=180) as resp:
-                  result = json.loads(resp.read().decode("utf-8"))
-
-              return result["choices"][0]["message"]["content"]
-
-          root = pathlib.Path(".")
-          files = []
-
-          allowed_exts = {".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".yml", ".yaml", ".css", ".scss"}
-          skip_dirs = {"node_modules", ".git", "dist", "build", ".next", "coverage"}
-
-          for fp in sorted(root.rglob("*")):
-              if not fp.is_file():
-                  continue
-              if any(part in skip_dirs for part in fp.parts):
-                  continue
-              if fp.suffix not in allowed_exts:
-                  continue
-              if fp.stat().st_size > 80000:
-                  continue
-
-              try:
-                  content = fp.read_text(encoding="utf-8", errors="replace")
-                  files.append(f"## FILE: {fp}
-```
-{content[:8000]}
-```")
-              except Exception:
-                  pass
-
-          source_context = "
-
-".join(files[:80])
-
-          system_prompt = textwrap.dedent("""
-          You are a senior software engineer writing GitHub Wiki documentation.
-
-          Rules:
-          - Only document what exists in the source code
-          - Never invent APIs, components, features, or types
-          - Use exact real names from the codebase
-          - Output raw markdown only
-          - Be concise but technically accurate
-          """).strip()
-
-          pages = {
-              "Home.md": "Create the main Home wiki page with project overview, features, tech stack, repository layout, getting started, and wiki index.",
-              "Architecture.md": "Create the Architecture wiki page covering app structure, routing, state management, entry points, and data flow.",
-              "Components.md": "Create the Components wiki page listing major React components, custom hooks, context providers, and styling approach.",
-              "API-Reference.md": "Create the API Reference wiki page documenting API calls, endpoints, auth, env vars, and integrations.",
-              "Business-Logic.md": "Create the Business Logic wiki page documenting workflows, business rules, algorithms, validations, and permissions."
-          }
-
-          output_dir = pathlib.Path("/tmp/wiki-pages")
-          output_dir.mkdir(parents=True, exist_ok=True)
-
-          for filename, task in pages.items():
-              print(f"Generating {filename}...")
-
-              prompt = f"""
-              SOURCE FILES:
-              {source_context}
-
-              TASK:
-              {task}
-              """
-
-              try:
-                  result = call_model(system_prompt, prompt)
-                  (output_dir / filename).write_text(result, encoding="utf-8")
-                  print(f"✓ {filename} generated")
-              except Exception as e:
-                  (output_dir / filename).write_text(
-                      f"# Generation failed
-
-Error: {str(e)}",
-                      encoding="utf-8"
-                  )
-                  print(f"✗ Failed: {filename}: {e}")
-
-          print("All wiki pages generated successfully")
-          PYTHON
-
-      - name: Example summary step (fixed)
+      - name: Summary
         run: |
-          echo "## 📚 Wiki Rebuild Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Wiki Rebuild Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Wiki Pages" >> $GITHUB_STEP_SUMMARY
-
-          shopt -s nullglob
           for f in /tmp/wiki-pages/*.md; do
-            size=$(wc -c < "$f")
-            echo "- $(basename "$f") — ${size} bytes" >> $GITHUB_STEP_SUMMARY
+            [ -f "$f" ] && echo "- $(basename "$f") — $(wc -c < "$f") bytes" >> $GITHUB_STEP_SUMMARY
           done
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Run completed successfully." >> $GITHUB_STEP_SUMMARY
