@@ -7,7 +7,10 @@ MODEL = "gpt-4.1"
 API_URL = "https://models.github.ai/inference/chat/completions"
 OUTPUT_DIR = pathlib.Path("/tmp/wiki-pages")
 ALLOWED_EXTS = {".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".yml", ".yaml", ".css", ".scss"}
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "coverage", "venv"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "coverage", "venv", "__pycache__", ".cache"}
+
+# Priority files to always include
+PRIORITY_FILES = {"package.json", "README.md", "tsconfig.json", ".env.example"}
 
 PAGES = {
     "Home.md": "Create main Home wiki page: project overview, features, tech stack, repo layout, getting started, wiki index.",
@@ -49,7 +52,9 @@ def call_model(system_prompt: str, user_prompt: str) -> str:
     return result["choices"][0]["message"]["content"]
 
 def collect_source_files() -> str:
-    files = []
+    priority = []
+    regular = []
+    
     for fp in sorted(pathlib.Path(".").rglob("*")):
         if not fp.is_file():
             continue
@@ -57,18 +62,27 @@ def collect_source_files() -> str:
             continue
         if fp.suffix not in ALLOWED_EXTS:
             continue
-        if fp.stat().st_size > 80000:
+        if fp.stat().st_size > 50000:
             continue
         try:
-            content = fp.read_text(encoding="utf-8", errors="replace")[:8000]
-            files.append(f"## FILE: {fp}\n```\n{content}\n```")
+            content = fp.read_text(encoding="utf-8", errors="replace")[:3000]
+            entry = f"## FILE: {fp}\n```\n{content}\n```"
+            if fp.name in PRIORITY_FILES:
+                priority.append(entry)
+            else:
+                regular.append(entry)
         except Exception:
             pass
-    return "\n\n".join(files[:80])
+    
+    # Take all priority files + limited regular files
+    selected = priority + regular[:25]
+    return "\n\n".join(selected)
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     source_context = collect_source_files()
+    
+    print(f"Source context size: {len(source_context)} chars")
     
     for filename, task in PAGES.items():
         print(f"Generating {filename}...")
