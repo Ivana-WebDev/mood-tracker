@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Generate wiki documentation from source code using GitHub Models API."""
+
+import os, json, pathlib, urllib.request
+
+MODEL = "gpt-4.1"
+API_URL = "https://models.github.ai/inference/chat/completions"
+OUTPUT_DIR = pathlib.Path("/tmp/wiki-pages")
+ALLOWED_EXTS = {".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".yml", ".yaml", ".css", ".scss"}
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "coverage", "venv"}
+
+PAGES = {
+    "Home.md": "Create main Home wiki page: project overview, features, tech stack, repo layout, getting started, wiki index.",
+    "Architecture.md": "Create Architecture page: app structure, routing, state management, entry points, data flow.",
+    "Components.md": "Create Components page: major React components, hooks, context providers, styling.",
+    "API-Reference.md": "Create API Reference page: API calls, endpoints, auth, env vars, integrations.",
+    "Business-Logic.md": "Create Business Logic page: workflows, rules, algorithms, validations, permissions."
+}
+
+SYSTEM_PROMPT = """You are a senior software engineer writing GitHub Wiki documentation.
+Rules:
+- Only document what exists in the source code
+- Never invent APIs, components, features, or types
+- Use exact real names from the codebase
+- Output raw markdown only
+- Be concise but technically accurate"""
+
+def call_model(system_prompt: str, user_prompt: str) -> str:
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 4000
+    }
+    req = urllib.request.Request(
+        API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+    return result["choices"][0]["message"]["content"]
+
+def collect_source_files() -> str:
+    files = []
+    for fp in sorted(pathlib.Path(".").rglob("*")):
+        if not fp.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in fp.parts):
+            continue
+        if fp.suffix not in ALLOWED_EXTS:
+            continue
+        if fp.stat().st_size > 80000:
+            continue
+        try:
+            content = fp.read_text(encoding="utf-8", errors="replace")[:8000]
+            files.append(f"## FILE: {fp}\n```\n{content}\n```")
+        except Exception:
+            pass
+    return "\n\n".join(files[:80])
+
+def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    source_context = collect_source_files()
+    
+    for filename, task in PAGES.items():
+        print(f"Generating {filename}...")
+        prompt = f"SOURCE FILES:\n{source_context}\n\nTASK:\n{task}"
+        try:
+            result = call_model(SYSTEM_PROMPT, prompt)
+            (OUTPUT_DIR / filename).write_text(result, encoding="utf-8")
+            print(f"✓ {filename} generated")
+        except Exception as e:
+            (OUTPUT_DIR / filename).write_text(f"# Generation failed\n\nError: {e}", encoding="utf-8")
+            print(f"✗ Failed: {filename}: {e}")
+    
+    print("All wiki pages generated")
+
+if __name__ == "__main__":
+    main()
