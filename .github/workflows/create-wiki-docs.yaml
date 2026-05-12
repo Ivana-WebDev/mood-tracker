@@ -1,411 +1,779 @@
-name: Wiki Documentation - Initial Setup
+name: Wiki Documentation — Full Rebuild
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to document"
+        required: true
+        default: "main"
+      dry_run:
+        description: "Dry run — generate pages but do NOT push to wiki"
+        required: false
+        default: "false"
+        type: boolean
 
 permissions:
   contents: write
-  models: read
 
 jobs:
-  initialize-wiki:
+  rebuild-wiki:
     runs-on: ubuntu-latest
-    name: Generate Full Wiki Documentation
+    name: Full Wiki Rebuild from Source
 
     steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v3
+      # ── 1. Checkout the target branch ─────────────────────────────────────
+      - name: Checkout source branch
+        uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.inputs.branch }}
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: "18"
-
-      ########################################################
-      # STEP 1 — Checkout Wiki
-      ########################################################
-
+      # ── 2. Checkout wiki (create if it doesn't exist yet) ─────────────────
       - name: Checkout wiki repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}.wiki
-          path: wiki-temp
+          path: wiki-repo
+        # Wiki may not exist on brand-new repos — init it if the checkout fails
+        continue-on-error: true
 
-      - name: Clean old generated docs
+      - name: Initialise wiki repo if missing
         run: |
-          cd wiki-temp
+          if [ ! -d "wiki-repo/.git" ]; then
+            mkdir -p wiki-repo
+            cd wiki-repo
+            git init
+            git remote add origin \
+              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
+            echo "# Wiki" > Home.md
+            git add Home.md
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: initialise wiki"
+            git push origin HEAD:master || true
+          fi
 
-          rm -f Home.md
-          rm -f Architecture.md
-          rm -f Components.md
-          rm -f Component-*.md
-
-          echo "Old generated pages removed."
-
-      ########################################################
-      # STEP 2 — Collect Metadata
-      ########################################################
-
-      - name: Collect project metadata
-        id: meta
+      # ── 3. Wipe all existing generated pages ──────────────────────────────
+      - name: Wipe existing wiki pages
         run: |
-          COMPONENTS_ROOT="client/src/components"
+          cd wiki-repo
+          # Remove every .md page — we regenerate everything from scratch
+          find . -maxdepth 1 -name "*.md" -delete
+          echo "Wiki cleared."
 
-          COMPONENT_ITEMS=$(find "$COMPONENTS_ROOT" \
-            \( -type d -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" -o -name "*.jsx" \) \
-            ! -name "*.test.*" \
-            ! -name "*.spec.*" \
-            ! -path "*/node_modules/*" \
-            2>/dev/null | sort)
+      # ── 4. Bundle the entire codebase into one JSON payload ───────────────
+      - name: Bundle codebase for AI analysis
+        id: bundle
+        run: |
+          python3 - <<'PYTHON'
+          import os, json, pathlib, sys
 
-          ITEMS_B64=$(echo "$COMPONENT_ITEMS" | base64 -w 0)
+          # ── Which file extensions to include ──────────────────────────────
+          CODE_EXTS  = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+          EXTRA_EXTS = {".json", ".env.example", ".md", ".yml", ".yaml",
+                        ".css", ".scss", ".html", ".prisma", ".graphql", ".sql"}
+          ALL_EXTS   = CODE_EXTS | EXTRA_EXTS
 
-          echo "component_items_b64=$ITEMS_B64" >> $GITHUB_OUTPUT
-          echo "components_root=$COMPONENTS_ROOT" >> $GITHUB_OUTPUT
+          # ── Directories / patterns to skip ────────────────────────────────
+          SKIP_DIRS = {
+            "node_modules", ".git", "dist", "build", ".next", "out",
+            "coverage", ".cache", ".turbo", ".vite", "storybook-static",
+          }
+          SKIP_FILES = {
+            "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+            ".DS_Store", "Thumbs.db",
+          }
+          # Skip files larger than 120 KB — likely generated / minified
+          MAX_BYTES = 120_000
 
-          PKG_NAME=$(jq -r '.name // "client-app"' client/package.json)
-          PKG_VER=$(jq -r '.version // "0.0.0"' client/package.json)
-          PKG_DESC=$(jq -r '.description // ""' client/package.json)
+          root = pathlib.Path(".")
+          collected = {}
 
-          echo "pkg_name=$PKG_NAME" >> $GITHUB_OUTPUT
-          echo "pkg_ver=$PKG_VER" >> $GITHUB_OUTPUT
-          echo "pkg_desc=$PKG_DESC" >> $GITHUB_OUTPUT
+          for fp in sorted(root.rglob("*")):
+            if not fp.is_file():
+              continue
+            # Skip blocked dirs
+            if any(part in SKIP_DIRS for part in fp.parts):
+              continue
+            if fp.name in SKIP_FILES:
+              continue
+            if fp.suffix not in ALL_EXTS and fp.name not in {
+              ".env.example", ".eslintrc", ".prettierrc", ".babelrc",
+              "Dockerfile", "docker-compose.yml",
+            }:
+              continue
+            if fp.stat().st_size > MAX_BYTES:
+              continue
+            try:
+              text = fp.read_text(encoding="utf-8", errors="replace")
+              collected[str(fp)] = text
+            except Exception as e:
+              print(f"  skip {fp}: {e}", file=sys.stderr)
 
-      ########################################################
-      # STEP 3 — Generate Docs with GitHub Models API
-      ########################################################
+          total_chars = sum(len(v) for v in collected.values())
+          print(f"Collected {len(collected)} files — {total_chars:,} chars total")
 
-      - name: Generate wiki docs
+          with open("/tmp/source_bundle.json", "w") as f:
+            json.dump(collected, f)
+
+          # Also write a plain directory tree for the AI
+          tree_lines = []
+          for fp in sorted(root.rglob("*")):
+            if any(part in SKIP_DIRS for part in fp.parts):
+              continue
+            if fp.name.startswith("."):
+              continue
+            depth = len(fp.relative_to(root).parts) - 1
+            prefix = "    " * depth + ("📁 " if fp.is_dir() else "📄 ")
+            tree_lines.append(prefix + fp.name)
+
+          with open("/tmp/directory_tree.txt", "w") as f:
+            f.write("\n".join(tree_lines[:2000]))   # cap at 2000 lines
+
+          print("Bundle ready.")
+          PYTHON
+
+      # ── 5. Generate all wiki pages via Claude ─────────────────────────────
+      - name: Generate wiki pages via Claude API
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMPONENT_ITEMS_B64: ${{ steps.meta.outputs.component_items_b64 }}
-          COMPONENTS_ROOT: ${{ steps.meta.outputs.components_root }}
-          PKG_NAME: ${{ steps.meta.outputs.pkg_name }}
-          PKG_VER: ${{ steps.meta.outputs.pkg_ver }}
-          PKG_DESC: ${{ steps.meta.outputs.pkg_desc }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_REPO:       ${{ github.repository }}
+          GITHUB_SHA:        ${{ github.sha }}
+          GITHUB_RUN_ID:     ${{ github.run_id }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_ACTOR: ${{ github.actor }}
+          SOURCE_BRANCH:     ${{ github.event.inputs.branch }}
+          ACTOR:             ${{ github.actor }}
         run: |
-          cat > /tmp/wiki-generator.js << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
+          python3 - <<'PYTHON'
+          import os, json, time, pathlib, textwrap, sys, math
+          import urllib.request, urllib.error
 
-          const WIKI_DIR = "wiki-temp";
-          const CLIENT_ROOT = "client";
-          const SRC_ROOT = "client/src";
+          # ── Config ────────────────────────────────────────────────────────
+          API_KEY    = os.environ["ANTHROPIC_API_KEY"]
+          REPO       = os.environ["GITHUB_REPO"]
+          SHA        = os.environ["GITHUB_SHA"]
+          RUN_ID     = os.environ["GITHUB_RUN_ID"]
+          SERVER_URL = os.environ["GITHUB_SERVER_URL"]
+          BRANCH     = os.environ["SOURCE_BRANCH"]
+          ACTOR      = os.environ["ACTOR"]
+          MODEL      = "claude-opus-4-5"
+          MAX_TOKENS = 4096
+          # Claude's context limit — we stay comfortably under it
+          CHAR_BUDGET = 150_000
 
-          const RUN_URL =
-            `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          with open("/tmp/source_bundle.json") as f:
+            all_files: dict = json.load(f)
 
-          const TS = new Date().toISOString();
+          with open("/tmp/directory_tree.txt") as f:
+            dir_tree = f.read()
 
-          const COMPONENT_ITEMS = process.env.COMPONENT_ITEMS_B64
-            ? Buffer.from(process.env.COMPONENT_ITEMS_B64, "base64")
-                .toString("utf8")
-                .trim()
-                .split("\n")
-                .filter(Boolean)
-            : [];
+          # ── Helpers ───────────────────────────────────────────────────────
+          def fmt_files(files: dict) -> str:
+            parts = []
+            for path, content in files.items():
+              parts.append(f"### FILE: {path}\n```\n{content}\n```")
+            return "\n\n".join(parts)
 
-          const PKG_NAME = process.env.PKG_NAME;
-          const PKG_VER = process.env.PKG_VER;
-          const PKG_DESC = process.env.PKG_DESC;
-          const GH_TOKEN = process.env.GH_TOKEN;
-
-          function footer() {
-            return `
-
----
-
-*Auto-generated by workflow run #${process.env.GITHUB_RUN_ID} · ${TS}*
-`;
-          }
-
-          function readFileSafe(filePath) {
-            try {
-              return fs.readFileSync(filePath, "utf8");
-            } catch {
-              return "";
+          def prioritised_subset(files: dict, char_budget: int) -> dict:
+            """
+            Return a budget-limited subset of files, prioritising:
+              1. Config roots (package.json, tsconfig, vite.config, etc.)
+              2. Entry points (main.tsx, index.ts, App.tsx, server.ts, etc.)
+              3. Everything else by file path length (shorter = closer to root)
+            """
+            PRIORITY_NAMES = {
+              "package.json", "tsconfig.json", "tsconfig.base.json",
+              "vite.config.ts", "vite.config.js", "next.config.js",
+              "next.config.ts", "tailwind.config.js", "tailwind.config.ts",
+              ".env.example", "Dockerfile", "docker-compose.yml",
+              "schema.prisma", "schema.graphql",
+              "main.tsx", "main.ts", "index.ts", "index.tsx",
+              "App.tsx", "App.ts", "server.ts", "server.js",
+              "router.ts", "routes.ts", "routes.tsx",
             }
-          }
+            priority, rest = {}, {}
+            for k, v in files.items():
+              fname = pathlib.Path(k).name
+              if fname in PRIORITY_NAMES:
+                priority[k] = v
+              else:
+                rest[k] = v
 
-          function readFolderContents(folderPath) {
-            const files = {};
+            # Sort rest: shorter path first (root-level first), then alpha
+            sorted_rest = dict(
+              sorted(rest.items(), key=lambda x: (len(x[0].split("/")), x[0]))
+            )
 
-            function walk(dir) {
-              let entries;
-              try {
-                entries = fs.readdirSync(dir, { withFileTypes: true });
-              } catch {
-                return;
-              }
+            result, used = {}, 0
+            for k, v in {**priority, **sorted_rest}.items():
+              chunk = len(v)
+              if used + chunk > char_budget:
+                # Truncate if it's a priority file, else skip
+                if k in priority:
+                  result[k] = v[:5000] + "\n... [truncated]"
+                  used += 5000
+                continue
+              result[k] = v
+              used += chunk
+            return result
 
-              for (const entry of entries) {
-                const full = path.join(dir, entry.name);
-
-                if (entry.isDirectory()) {
-                  walk(full);
-                } else if (/\.(js|jsx|ts|tsx|css|scss|json)$/.test(entry.name)) {
-                  files[full] = readFileSafe(full);
-                }
-              }
+          def call_claude(system: str, user: str) -> str:
+            payload = {
+              "model":      MODEL,
+              "max_tokens": MAX_TOKENS,
+              "system":     system,
+              "messages":   [{"role": "user", "content": user}],
             }
+            req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps(payload).encode(),
+              headers={
+                "x-api-key":         API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+              },
+              method="POST",
+            )
+            for attempt in range(4):
+              try:
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                  return json.loads(resp.read())["content"][0]["text"]
+              except urllib.error.HTTPError as e:
+                body = e.read().decode()
+                if e.code in {429, 529} and attempt < 3:
+                  wait = 30 * (attempt + 1)
+                  print(f"  Rate limited — waiting {wait}s …", flush=True)
+                  time.sleep(wait)
+                else:
+                  raise RuntimeError(f"Claude HTTP {e.code}: {body}")
+            return ""
 
-            walk(folderPath);
-            return files;
-          }
+          def footer() -> str:
+            run_url    = f"{SERVER_URL}/{REPO}/actions/runs/{RUN_ID}"
+            commit_url = f"{SERVER_URL}/{REPO}/commit/{SHA}"
+            return (
+              f"\n\n---\n"
+              f"*Generated by [workflow run #{RUN_ID}]({run_url}) "
+              f"from branch `{BRANCH}` · commit [`{SHA[:7]}`]({commit_url}) "
+              f"· triggered by @{ACTOR}*"
+            )
 
-          function findComponentUsages(componentName, rootDir) {
-            const matches = [];
+          # ── Shared system prompt ──────────────────────────────────────────
+          SYSTEM = textwrap.dedent("""
+            You are a senior software engineer writing GitHub Wiki documentation
+            for a real production project. You have been given the project's
+            complete source code.
 
-            function walk(dir) {
-              let entries;
-              try {
-                entries = fs.readdirSync(dir, { withFileTypes: true });
-              } catch {
-                return;
-              }
+            Non-negotiable rules:
+            • ONLY document what actually exists in the provided source code.
+              Never invent features, endpoints, props, or types.
+            • Use real names: exact function names, component names, interface
+              names, file paths, and variable names copied from the code.
+            • Quote real code snippets (keep them focused and short).
+            • If something is a stub, partial, or TODO — say so explicitly.
+            • If a section cannot be filled from the code, omit it entirely.
+              Never write placeholder text like "TBD" or "add more here".
+            • Write clear, technical prose. Use markdown tables where helpful.
+            • Output raw Markdown only. No preamble, no meta-commentary.
+          """).strip()
 
-              for (const entry of entries) {
-                const full = path.join(dir, entry.name);
+          # ── Build source context blocks (budget-limited) ──────────────────
+          full_ctx  = fmt_files(prioritised_subset(all_files, CHAR_BUDGET))
+          # For component-specific pages we use a tighter budget
+          comp_ctx  = fmt_files(prioritised_subset(all_files, 80_000))
 
-                if (entry.isDirectory()) {
-                  if (
-                    ["node_modules", ".git", "dist", "build"].includes(entry.name)
-                  ) {
-                    continue;
-                  }
+          # ── Identify top-level groups for the component index ─────────────
+          # Group files by their first src/ subdirectory
+          from collections import defaultdict
+          groups: dict[str, list] = defaultdict(list)
+          for fp in all_files:
+            parts = pathlib.Path(fp).parts
+            # Find "src" segment
+            try:
+              idx = parts.index("src")
+              sub = parts[idx + 1] if idx + 1 < len(parts) else "root"
+            except ValueError:
+              sub = parts[1] if len(parts) > 1 else "root"
+            groups[sub].append(fp)
 
-                  walk(full);
-                } else if (/\.(js|jsx|ts|tsx)$/.test(entry.name)) {
-                  const content = readFileSafe(full);
+          out_dir = pathlib.Path("/tmp/wiki-pages")
+          out_dir.mkdir(exist_ok=True)
 
-                  if (
-                    content.includes(`<${componentName}`) ||
-                    content.includes(`from './${componentName}`) ||
-                    content.includes(`from "../${componentName}`)
-                  ) {
-                    matches.push({
-                      file: full,
-                      snippet: content.slice(0, 3000),
-                    });
-                  }
-                }
-              }
-            }
+          # ═══════════════════════════════════════════════════════════════════
+          # PAGE DEFINITIONS
+          # Each entry: filename, prompt
+          # ═══════════════════════════════════════════════════════════════════
+          pages = []
 
-            walk(rootDir);
-            return matches;
-          }
+          # ── Home ─────────────────────────────────────────────────────────
+          pages.append(("Home.md", textwrap.dedent(f"""
+            DIRECTORY TREE:
+            {dir_tree}
 
-          async function callCopilot(prompt) {
-            const response = await fetch(
-              "https://models.inference.ai.azure.com/chat/completions",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${GH_TOKEN}`,
-                },
-                body: JSON.stringify({
-                  model: "gpt-4o",
-                  max_tokens: 4000,
-                  messages: [
-                    {
-                      role: "system",
-                      content:
-                        "You are a senior React engineer writing GitHub Wiki documentation.",
-                    },
-                    {
-                      role: "user",
-                      content: prompt,
-                    },
-                  ],
-                }),
-              }
-            );
+            SOURCE FILES:
+            {full_ctx}
 
-            if (!response.ok) {
-              const error = await response.text();
-              throw new Error(error);
-            }
+            ---
 
-            const data = await response.json();
-            return data.choices[0].message.content;
-          }
+            Write the **Home** wiki page for this project. Sections:
 
-          function buildComponentPrompt(name, files, usages) {
-            const fileBlock = Object.entries(files)
-              .map(
-                ([file, content]) =>
-                  `### File: ${file}\n\`\`\`\n${content.slice(0, 6000)}\n\`\`\``
+            ## [Project name from package.json or inferred]
+            One concise paragraph: what this application actually does,
+            who it is for, and what problem it solves — derived from the code,
+            not just the package name.
+
+            ## Features
+            Bullet list of real, implemented features you can see in the code.
+            Do not list aspirational or partially-implemented features without
+            noting they are partial.
+
+            ## Tech Stack
+            Table with columns: Category | Technology | Version | Notes.
+            Pull exact versions from package.json. Add a "Notes" column for
+            any non-obvious library choices (e.g. why a specific state manager
+            or router was chosen, if inferable from the code).
+
+            ## Repository Layout
+            Use the directory tree above. Describe the purpose of each
+            top-level folder and key files based on what the code actually does.
+
+            ## Getting Started
+            Derive install + run steps from the scripts in package.json and
+            any README or .env.example files present. Show real commands.
+
+            ## Wiki Index
+            Linked list of all other wiki pages this workflow will generate:
+            Architecture, API-Reference, Components, Data-Models,
+            Business-Logic, Testing.
+          """).strip() + footer()))
+
+          # ── Architecture ──────────────────────────────────────────────────
+          pages.append(("Architecture.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {full_ctx}
+
+            ---
+
+            Write the **Architecture** wiki page. Sections:
+
+            ## Application Architecture
+            Describe the overall shape of the system: is it a SPA, SSR app,
+            monorepo, full-stack repo, API-only service? What are the major
+            layers and how do they communicate?
+
+            Include a Mermaid diagram if there are multiple layers or services.
+
+            ## Entry Points
+            Trace the real startup sequence — which file is the entry point,
+            how routing is set up, how the root component tree is mounted.
+            Use actual filenames and function names.
+
+            ## Folder Structure & Responsibilities
+            Table: Folder | Responsibility | Key files.
+            Every folder under src/ (or equivalent) with a one-line description
+            of what lives there, based on what you actually see.
+
+            ## Data Flow
+            Walk through a concrete, real user interaction end-to-end:
+            UI event → handler → state/context update → API call (if any)
+            → re-render. Use real component and function names.
+
+            ## State Management
+            What state primitives are used (useState, useReducer, Context,
+            Zustand, Redux, Jotai, etc.)? Show real examples from the code.
+            Note if state is co-located vs. lifted vs. global.
+
+            ## Routing
+            What router is used? List the real routes (paths and the component
+            they render). Show the route definition code.
+
+            ## Build & Tooling
+            Real scripts from package.json, compiler options from tsconfig,
+            env vars from .env.example or inline references. Note anything
+            non-default.
+
+            ## Key Design Patterns
+            Patterns observable in the codebase worth documenting:
+            custom hooks, HOCs, provider patterns, service layers, etc.
+          """).strip() + footer()))
+
+          # ── API Reference ─────────────────────────────────────────────────
+          pages.append(("API-Reference.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {full_ctx}
+
+            ---
+
+            Write the **API Reference** wiki page. Sections:
+
+            ## Overview
+            Is this project a REST API, GraphQL API, tRPC API, or a client
+            that calls an external API? Summarise what you find.
+
+            ## Endpoints / Operations
+            For every HTTP handler, GraphQL resolver, tRPC procedure, or
+            outbound fetch call found in the source, produce a table:
+
+            | Method | Path / Operation | Handler / Caller (file:line~ish) | Auth required | Request shape | Response shape | Purpose |
+
+            Extract real URL strings, TypeScript request/response types, and
+            any auth middleware names. If base URLs come from env vars, name
+            the variable.
+
+            ## Authentication & Authorisation
+            How is auth implemented? Middleware, guards, tokens, sessions?
+            Show the actual code patterns (e.g., the auth middleware function).
+
+            ## Error Handling
+            How are errors returned to clients? Standard error shapes?
+            Show real code.
+
+            ## Environment Variables
+            Table: Variable | Used in (file) | Purpose | Example value.
+            Every env var referenced in the code.
+
+            ## External Services
+            Any third-party API calls (Stripe, SendGrid, S3, OpenAI, etc.).
+            Document the integration point (file + function) and purpose.
+
+            If there are NO API handlers or external calls, state that clearly
+            and document local data patterns instead.
+          """).strip() + footer()))
+
+          # ── Components ────────────────────────────────────────────────────
+          pages.append(("Components.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {comp_ctx}
+
+            DIRECTORY TREE:
+            {dir_tree}
+
+            ---
+
+            Write the **Components** wiki page. Sections:
+
+            ## Component Inventory
+            Table of every exported React component:
+            | Component | File | Props interface | Responsibility |
+
+            ## Component Hierarchy
+            Show the parent → child render tree using indented markdown
+            or a Mermaid diagram. Only include components you can confirm
+            are rendered by another component in the code.
+
+            ## Custom Hooks
+            For every file or function whose name starts with `use`:
+            Table: Hook | File | Parameters | Returns | Purpose.
+
+            ## Context Providers
+            List every React Context and its Provider. What state does it
+            expose? Which components consume it?
+
+            ## Shared / Reusable Patterns
+            Components or hooks used in 3+ places — highlight these as
+            the primary reusable building blocks.
+
+            ## Styling Approach
+            What styling solution is used (CSS Modules, Tailwind, Emotion,
+            styled-components, plain CSS)? Show a real example.
+          """).strip() + footer()))
+
+          # ── Individual component pages ────────────────────────────────────
+          # Identify component files: exported function/class components in tsx/jsx
+          import re
+          component_files = {}
+          for fp, content in all_files.items():
+            p = pathlib.Path(fp)
+            if p.suffix not in {".tsx", ".jsx"}:
+              continue
+            if any(skip in fp for skip in ["test", "spec", "stories", "__"]):
+              continue
+            # Must have at least one export that looks like a component
+            if re.search(r"export\s+(default\s+)?(function|const|class)\s+[A-Z]", content):
+              component_files[fp] = content
+
+          print(f"Found {len(component_files)} component files for individual pages", flush=True)
+
+          for fp, content in component_files.items():
+            comp_name = pathlib.Path(fp).stem
+            page_name = f"Component-{comp_name}.md"
+
+            # Find other files that import this component (usages)
+            usage_snippets = []
+            for other_fp, other_content in all_files.items():
+              if other_fp == fp:
+                continue
+              if comp_name in other_content:
+                # Include a focused snippet around the import/usage
+                idx = other_content.find(comp_name)
+                start = max(0, idx - 200)
+                end   = min(len(other_content), idx + 400)
+                usage_snippets.append(
+                  f"### {other_fp}\n```\n{other_content[start:end]}\n```"
+                )
+              if len(usage_snippets) >= 6:
+                break
+
+            usage_block = "\n\n".join(usage_snippets) if usage_snippets else "Not imported elsewhere in the codebase."
+
+            pages.append((page_name, textwrap.dedent(f"""
+              Write a detailed GitHub Wiki page for the React component defined in:
+
+              ### {fp}
+              ```
+              {content[:10000]}
+              ```
+
+              {'... [file truncated at 10 000 chars]' if len(content) > 10000 else ''}
+
+              USAGE IN OTHER FILES:
+              {usage_block}
+
+              ---
+
+              Include these sections (omit any you cannot fill from the code):
+
+              ## Overview
+              What this component does, its role in the UI, and when it is rendered.
+
+              ## Props
+              Markdown table: Prop | Type | Required | Default | Description.
+              Copy the exact TypeScript interface or prop types from the source.
+
+              ## State
+              Every useState / useReducer call: variable name, type, initial value,
+              and what it tracks.
+
+              ## Side Effects
+              Every useEffect: dependencies, what it does, and when it runs.
+
+              ## Business Logic
+              Any non-trivial computation, validation, or transformation inside
+              the component. Explain the algorithm with the real code snippet.
+
+              ## Rendered Output
+              Describe the JSX structure: what HTML/components are rendered,
+              key conditional branches, list rendering patterns.
+
+              ## Events & Handlers
+              Table: Event | Handler function | What it does.
+
+              ## Where It Is Used
+              Which parent components or pages render this component.
+
+              ## Dependencies
+              Imported libraries, hooks, utilities, and context consumers.
+
+              ## Usage Example
+              A minimal but real usage snippet based on the actual props interface.
+            """).strip() + footer()))
+
+          # ── Data Models ───────────────────────────────────────────────────
+          pages.append(("Data-Models.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {full_ctx}
+
+            ---
+
+            Write the **Data Models & Types** wiki page. Sections:
+
+            ## Type Inventory
+            For every TypeScript `interface`, `type`, and `enum` found,
+            copy the definition verbatim in a code block, then add a
+            one-paragraph explanation of what it represents in the business
+            domain and where it is used.
+
+            Group by domain (e.g. User, Auth, Product, Order …) if multiple
+            domains exist.
+
+            ## Type Relationships
+            If types reference each other, describe the relationships.
+            A Mermaid class diagram is ideal if there are 5+ types.
+
+            ## Enums & Constants
+            List every enum and important constant. For each: name, values,
+            and where it is used.
+
+            ## Validation
+            Any runtime validation (Zod, Yup, class-validator, manual guards).
+            Show the real schema/validator code.
+
+            ## Persistence Schema
+            If Prisma, Drizzle, TypeORM, or raw SQL is present — copy the
+            real schema and explain each model and its relationships.
+
+            If there is localStorage / sessionStorage usage — document the
+            keys and their value shapes.
+
+            ## Derived / Computed Types
+            Utility types, mapped types, conditional types used in the project.
+          """).strip() + footer()))
+
+          # ── Business Logic ────────────────────────────────────────────────
+          pages.append(("Business-Logic.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {full_ctx}
+
+            ---
+
+            Write the **Business Logic** wiki page. This is the most important
+            page in the wiki — it explains what the application actually does
+            and why, beyond the basic CRUD plumbing.
+
+            ## Domain Overview
+            What real-world domain does this application model? What are the
+            core entities and concepts? (Derive from the code, not marketing.)
+
+            ## Core Workflows
+            Walk through each major user-facing workflow the code implements:
+            - Name the workflow
+            - List the steps in order
+            - Reference the real files, functions, and components involved
+            - Note any business rules enforced at each step
+
+            ## Business Rules & Constraints
+            Every constraint, validation rule, or invariant enforced in the
+            code (e.g. "rating must be 1–5", "bookings cannot overlap",
+            "users must verify email before purchasing"). Quote the code.
+
+            ## Algorithms & Calculations
+            Any non-trivial computation: scoring, ranking, scheduling,
+            pricing, recommendation, aggregation, date arithmetic, etc.
+            For each: name, file + function, explanation, and the real code.
+
+            ## Access Control & Permissions
+            Roles, permission checks, route guards — whatever the code uses.
+            Show the real implementation.
+
+            ## Notifications & Side Effects
+            Emails, webhooks, background jobs, analytics events triggered by
+            business actions. Show where they are fired.
+
+            ## Edge Cases & Error States
+            Places the code explicitly handles edge cases. What assumptions
+            are enforced and what happens when they are violated?
+          """).strip() + footer()))
+
+          # ── Testing ───────────────────────────────────────────────────────
+          pages.append(("Testing.md", textwrap.dedent(f"""
+            SOURCE FILES:
+            {full_ctx}
+
+            ---
+
+            Write the **Testing** wiki page. Sections:
+
+            ## Test Stack
+            What testing libraries and runners are present in package.json?
+            (Jest, Vitest, Playwright, Cypress, Testing Library, etc.)
+            List with versions.
+
+            ## Test Structure
+            Where are tests located? What naming convention is used?
+            (*.test.ts, *.spec.ts, __tests__/ folder, etc.)
+
+            ## Test Inventory
+            For every test file found, list:
+            Table: File | What it tests | Test count (count `it(` / `test(` calls) | Type (unit/integration/e2e)
+
+            ## Test Patterns
+            What patterns are used?
+            - Mocking strategy (jest.mock, vi.mock, MSW, etc.)
+            - Test data / fixtures approach
+            - Render helpers (custom render with providers, etc.)
+            Copy representative real examples.
+
+            ## Coverage
+            If a coverage config exists in jest.config / vitest.config,
+            note the thresholds. If a coverage report artifact is generated
+            in CI, link to where it appears.
+
+            ## How to Run Tests
+            Exact commands from package.json scripts.
+
+            If there are NO tests, say so clearly and note which config files
+            suggest testing was intended.
+          """).strip() + footer()))
+
+          # ═══════════════════════════════════════════════════════════════════
+          # Generate each page
+          # ═══════════════════════════════════════════════════════════════════
+          for filename, prompt in pages:
+            print(f"\n→ Generating {filename} …", flush=True)
+            try:
+              result = call_claude(SYSTEM, prompt)
+              dest = out_dir / filename
+              dest.write_text(result, encoding="utf-8")
+              print(f"  ✓ {len(result):,} chars", flush=True)
+            except Exception as e:
+              print(f"  ✗ FAILED: {e}", file=sys.stderr)
+              (out_dir / filename).write_text(
+                f"# {filename.replace('-', ' ').replace('.md', '')}\n\n"
+                f"⚠️ Generation failed for this run.\n\nError: `{e}`\n"
+                + footer()
               )
-              .join("\n\n");
+            # Gentle pause between API calls to avoid rate limits
+            time.sleep(3)
 
-            const usageBlock = usages.length
-              ? usages
-                  .map(
-                    (u) =>
-                      `### Used in: ${u.file}\n\`\`\`\n${u.snippet}\n\`\`\``
-                  )
-                  .join("\n\n")
-              : "No usages found.";
+          print("\n✅ All pages generated.", flush=True)
+          PYTHON
 
-            return `
-          Write detailed GitHub Wiki documentation for the React component "${name}"
+      # ── 6. Copy generated pages into wiki repo ────────────────────────────
+      - name: Copy pages into wiki repo
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          for f in /tmp/wiki-pages/*.md; do
+            cp "$f" "wiki-repo/$(basename "$f")"
+            echo "  ✓ $(basename "$f")"
+          done
 
-          Include:
+      - name: List pages (dry-run preview)
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "### DRY RUN — pages that would be pushed:"
+          ls -lh /tmp/wiki-pages/
+          echo ""
+          echo "### Home.md preview (first 80 lines):"
+          head -80 /tmp/wiki-pages/Home.md || true
 
-          ## Overview
-          ## Props & Interfaces
-          ## State & Hooks
-          ## Business Logic
-          ## Rendered UI
-          ## Dependencies
-          ## Where This Component Is Used
-          ## Parent / Child Component Relationships
-          ## API Integration
-          ## Usage Example
-
-          Use markdown tables heavily.
-
-          --- SOURCE FILES ---
-          ${fileBlock}
-
-          --- USAGE REFERENCES ---
-          ${usageBlock}
-          `;
-          }
-
-          async function main() {
-            const componentNames = [];
-
-            for (const item of COMPONENT_ITEMS) {
-              const stat = fs.statSync(item);
-              let componentName;
-              let files;
-
-              if (stat.isDirectory()) {
-                componentName = path.basename(item);
-                files = readFolderContents(item);
-              } else {
-                componentName = path.basename(item).replace(/\.(js|jsx|ts|tsx)$/,"");
-                files = {
-                  [item]: readFileSafe(item),
-                };
-              }
-
-              if (!Object.keys(files).length) continue;
-
-              componentNames.push(componentName);
-
-              console.log(`Generating docs for ${componentName}`);
-
-              const usages = findComponentUsages(componentName, SRC_ROOT);
-              const prompt = buildComponentPrompt(componentName, files, usages);
-
-              let result;
-
-              try {
-                result = await callCopilot(prompt);
-              } catch (e) {
-                console.log(`Failed for ${componentName}`);
-                console.log(e.message);
-                continue;
-              }
-
-              fs.writeFileSync(
-                path.join(WIKI_DIR, `Component-${componentName}.md`),
-                `# ${componentName}\n\n${result}${footer()}`
-              );
-            }
-
-            const componentsTable = componentNames
-              .map(
-                (name) =>
-                  `| [[${name}|Component-${name}]] | client/src/components/${name} |`
-              )
-              .join("\n");
-
-            fs.writeFileSync(
-              path.join(WIKI_DIR, "Components.md"),
-              `# Components
-
-| Component | Path |
-|---|---|
-${componentsTable}
-
-${footer()}
-`
-            );
-
-            fs.writeFileSync(
-              path.join(WIKI_DIR, "Home.md"),
-              `# Home
-
-## About
-
-Project: ${PKG_NAME}
-
-Version: ${PKG_VER}
-
-${PKG_DESC}
-
-## Wiki Navigation
-
-- [[Architecture]]
-- [[Components]]
-
-${footer()}
-`
-            );
-
-            fs.writeFileSync(
-              path.join(WIKI_DIR, "Architecture.md"),
-              `# Architecture
-
-## Overview
-
-This page describes the architecture of ${PKG_NAME}.
-
-## Component Structure
-
-See [[Components]]
-
-${footer()}
-`
-            );
-          }
-
-          main().catch(err => {
-            console.error(err);
-            process.exit(1);
-          });
-          EOF
-
-          node /tmp/wiki-generator.js
-
-      ########################################################
-      # STEP 4 — Commit Wiki
-      ########################################################
-
+      # ── 7. Commit and push ────────────────────────────────────────────────
       - name: Commit and push wiki
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          cd wiki-temp
-
-          git config user.name "github-actions[bot]"
+          cd wiki-repo
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add -A
 
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "✅ No changes to commit."
           else
-            git commit -m "docs: auto-generate wiki docs [skip ci]"
+            git commit -m \
+              "docs: full wiki rebuild from branch '${{ github.event.inputs.branch }}' · ${{ github.sha }} [skip ci]"
             git push
+            echo "✅ Wiki pushed."
           fi
+
+      # ── 8. Job summary ────────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## 📚 Wiki Rebuild Summary"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Branch** | \`${{ github.event.inputs.branch }}\` |"
+            echo "| **Commit** | \`${{ github.sha }}\` |"
+            echo "| **Dry run** | ${{ github.event.inputs.dry_run }} |"
+            echo "| **Actor** | ${{ github.actor }} |"
+            echo ""
+            echo "### Wiki Pages"
+            for f in /tmp/wiki-pages/*.md 2>/dev/null; do
+              size=$(wc -c < "$f")
+              echo "- \`$(basename $f)\` — ${size} bytes"
+            done
+            echo ""
+            echo "[View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> $GITHUB_STEP_SUMMARY
