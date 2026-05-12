@@ -1,356 +1,460 @@
-name: Wiki Documentation - AI Analysis
+name: AI-Powered Wiki Documentation
 
 on:
   workflow_dispatch:
+    inputs:
+      full_rebuild:
+        description: 'Force full documentation rebuild (ignores diff)'
+        required: false
+        default: 'false'
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'tsconfig.json'
 
 permissions:
   contents: write
-  models: read     # required to call the GitHub Models / Copilot API with GITHUB_TOKEN
 
 jobs:
-  analyze-and-document:
+  document:
     runs-on: ubuntu-latest
-    name: Analyze Code & Update Wiki Documentation
+    name: Generate Project-Specific Wiki Documentation
 
     steps:
+      # ── 1. Checkout source ────────────────────────────────────────────────
       - name: Checkout main branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
+          fetch-depth: 0          # full history needed for accurate diffs
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-
-      # ─────────────────────────────────────────────
-      # STEP 1 – Discover component folders & diff
-      # ─────────────────────────────────────────────
-      - name: Discover components and detect last-commit diff
-        id: discover
+      # ── 2. Determine which files changed (or all files on full rebuild) ───
+      - name: Resolve files to document
+        id: files
         run: |
-          COMPONENTS_ROOT="mood-tracker/client/src/components"
+          FULL="${{ github.event.inputs.full_rebuild }}"
+          EVENT="${{ github.event_name }}"
 
-          # All component folders (one level deep)
-          COMPONENT_FOLDERS=$(find "$COMPONENTS_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+          if [[ "$FULL" == "true" || "$EVENT" == "workflow_dispatch" ]]; then
+            echo "mode=full" >> $GITHUB_OUTPUT
+            FILES=$(find src -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \) | sort)
+          else
+            # Files changed in the last push (handles merge commits too)
+            FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} \
+              | grep -E '^src/.*\.(ts|tsx|js|jsx)$' || true)
+          fi
 
-          if [ -z "$COMPONENT_FOLDERS" ]; then
-            echo "⚠️  No component folders found under $COMPONENTS_ROOT"
-            echo "component_folders=" >> $GITHUB_OUTPUT
-            echo "changed_components=" >> $GITHUB_OUTPUT
+          if [[ -z "$FILES" ]]; then
+            echo "no_changes=true" >> $GITHUB_OUTPUT
+            echo "No relevant source files changed – skipping documentation update."
             exit 0
           fi
 
-          echo "Found component folders:"
-          echo "$COMPONENT_FOLDERS"
+          echo "no_changes=false" >> $GITHUB_OUTPUT
 
-          # Folders touched by the last commit
-          LAST_COMMIT_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null || echo "")
-          echo "Last commit files:"
-          echo "$LAST_COMMIT_FILES"
+          # Persist file list for later steps
+          echo "$FILES" > /tmp/files_to_document.txt
+          echo "Found files:"
+          cat /tmp/files_to_document.txt
 
-          CHANGED=""
-          while IFS= read -r folder; do
-            FOLDER_NAME=$(basename "$folder")
-            # Check if any file in this folder was in the last commit diff
-            if echo "$LAST_COMMIT_FILES" | grep -q "^mood-tracker/client/src/components/$FOLDER_NAME/"; then
-              CHANGED="$CHANGED,$FOLDER_NAME"
-            fi
-          done <<< "$COMPONENT_FOLDERS"
+      # ── 3. Bundle all relevant source into one payload ────────────────────
+      - name: Bundle source files for AI analysis
+        if: steps.files.outputs.no_changes != 'true'
+        run: |
+          python3 - <<'PYTHON'
+          import os, json, pathlib
 
-          CHANGED="${CHANGED#,}"  # strip leading comma
+          files_path = "/tmp/files_to_document.txt"
+          with open(files_path) as f:
+            changed = [l.strip() for l in f if l.strip()]
 
-          # Store folder list as newline-delimited, base64-encoded to survive env
-          FOLDERS_B64=$(echo "$COMPONENT_FOLDERS" | base64 -w 0)
-          echo "component_folders_b64=$FOLDERS_B64" >> $GITHUB_OUTPUT
-          echo "changed_components=$CHANGED" >> $GITHUB_OUTPUT
-          echo "components_root=$COMPONENTS_ROOT" >> $GITHUB_OUTPUT
+          # Also always include package.json + tsconfig for full context
+          context_files = ["package.json", "tsconfig.json"]
+          all_src = sorted(
+            set(str(p) for p in pathlib.Path("src").rglob("*")
+                if p.suffix in {".ts", ".tsx", ".js", ".jsx"} and p.is_file())
+          )
 
-      # ─────────────────────────────────────────────
-      # STEP 2 – Checkout wiki
-      # ─────────────────────────────────────────────
+          def read(fp):
+            try:
+              return pathlib.Path(fp).read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+              return f"[Could not read: {e}]"
+
+          bundle = {
+            "changed_files": changed,
+            "context_files": {fp: read(fp) for fp in context_files if os.path.exists(fp)},
+            "all_source_files": {fp: read(fp) for fp in all_src},
+          }
+
+          with open("/tmp/source_bundle.json", "w") as out:
+            json.dump(bundle, out)
+
+          total = sum(len(v) for v in bundle["all_source_files"].values())
+          print(f"Bundled {len(all_src)} source files ({total:,} chars total)")
+          PYTHON
+
+      # ── 4. Call Claude API for each wiki page ─────────────────────────────
+      - name: Generate wiki pages via Claude
+        if: steps.files.outputs.no_changes != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_REPO:       ${{ github.repository }}
+          GITHUB_SHA:        ${{ github.sha }}
+          GITHUB_RUN_ID:     ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          COMMIT_MESSAGE:    ${{ github.event.head_commit.message }}
+          COMMIT_TIMESTAMP:  ${{ github.event.head_commit.timestamp }}
+          TRIGGERED_BY:      ${{ github.actor }}
+          EVENT_NAME:        ${{ github.event_name }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, json, time, pathlib, textwrap, sys
+          import urllib.request, urllib.error
+
+          ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+          REPO              = os.environ["GITHUB_REPO"]
+          SHA               = os.environ["GITHUB_SHA"]
+          RUN_ID            = os.environ["GITHUB_RUN_ID"]
+          SERVER_URL        = os.environ["GITHUB_SERVER_URL"]
+          COMMIT_MSG        = os.environ.get("COMMIT_MESSAGE", "workflow_dispatch")
+          TIMESTAMP         = os.environ.get("COMMIT_TIMESTAMP", "")
+          ACTOR             = os.environ["TRIGGERED_BY"]
+          EVENT             = os.environ["EVENT_NAME"]
+
+          with open("/tmp/source_bundle.json") as f:
+            bundle = json.load(f)
+
+          # ── helpers ──────────────────────────────────────────────────────
+          def call_claude(system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
+            payload = {
+              "model": "claude-opus-4-5",
+              "max_tokens": max_tokens,
+              "system": system_prompt,
+              "messages": [{"role": "user", "content": user_prompt}],
+            }
+            req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps(payload).encode(),
+              headers={
+                "x-api-key":         ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+              },
+              method="POST",
+            )
+            for attempt in range(3):
+              try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                  return json.loads(resp.read())["content"][0]["text"]
+              except urllib.error.HTTPError as e:
+                body = e.read().decode()
+                print(f"HTTP {e.code}: {body}", file=sys.stderr)
+                if e.code in {429, 529} and attempt < 2:
+                  time.sleep(30 * (attempt + 1))
+                else:
+                  raise
+            return ""
+
+          def fmt_sources(files: dict) -> str:
+            """Format a dict of {path: content} into a readable block."""
+            parts = []
+            for path, content in files.items():
+              parts.append(f"### FILE: {path}\n```\n{content}\n```")
+            return "\n\n".join(parts)
+
+          def footer(page: str) -> str:
+            run_url = f"{SERVER_URL}/{REPO}/actions/runs/{RUN_ID}"
+            commit_url = f"{SERVER_URL}/{REPO}/commit/{SHA}"
+            return (
+              f"\n\n---\n"
+              f"*Auto-generated by [workflow run #{RUN_ID}]({run_url}) "
+              f"· commit [`{SHA[:7]}`]({commit_url}): {COMMIT_MSG} "
+              f"· {TIMESTAMP}*"
+            )
+
+          all_src_text   = fmt_sources(bundle["all_source_files"])
+          context_text   = fmt_sources(bundle["context_files"])
+          changed_list   = "\n".join(f"- {f}" for f in bundle["changed_files"])
+
+          # Shared system prompt that applies to every page
+          BASE_SYSTEM = textwrap.dedent("""
+            You are a senior software engineer writing wiki documentation for a real project.
+            You have access to the COMPLETE source code of the project.
+
+            Rules:
+            - Document ONLY what actually exists in the code. Never invent features, endpoints, or types.
+            - Use real names: actual function names, interface names, file paths, variable names from the code.
+            - If a piece of logic is complex or non-obvious, explain WHY it works that way based on the code.
+            - Use real code snippets copied verbatim from the source (keep them short and focused).
+            - If something isn't implemented yet or is a stub, say so explicitly.
+            - Write in clear, technical prose. Use markdown tables where useful.
+            - Do NOT add generic boilerplate, placeholder text, or "TODO: fill this in" sections.
+            - Output raw Markdown only. No preamble, no commentary outside the document.
+          """).strip()
+
+          out_dir = pathlib.Path("/tmp/wiki-pages")
+          out_dir.mkdir(exist_ok=True)
+
+          # ── Page definitions ─────────────────────────────────────────────
+          pages = [
+
+            # 1. Home / Overview
+            {
+              "filename": "Home.md",
+              "user_prompt": textwrap.dedent(f"""
+                PROJECT CONTEXT (package.json, tsconfig.json):
+                {context_text}
+
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                ---
+
+                Write the **Home** wiki page for this project. Include:
+                1. **What this project actually does** – derive from the code, not just the package name.
+                2. **Key capabilities** – list the real features you can see implemented.
+                3. **Tech stack** – exact versions from package.json. Note any non-obvious library choices.
+                4. **Repository structure** – real directory tree with a one-line description of each folder/file's purpose based on what you see in the code.
+                5. **Quick-start** – how to install and run, derived from scripts in package.json.
+                6. **Links** to the other wiki pages (Architecture, API-Endpoints, Components, Data-Models, Business-Logic).
+
+                Do NOT include sections you cannot fill from the actual code.
+              """).strip() + footer("Home"),
+            },
+
+            # 2. Architecture
+            {
+              "filename": "Architecture.md",
+              "user_prompt": textwrap.dedent(f"""
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                PROJECT CONFIG:
+                {context_text}
+
+                ---
+
+                Write the **Architecture** wiki page. Include:
+                1. **High-level architecture** – how the pieces fit together (entry point → routing → pages → components → services/API layer).
+                   Use a mermaid diagram if the flow is non-trivial.
+                2. **Directory structure** – every folder under src/ with its actual role.
+                3. **Data flow** – trace a real user interaction from UI event → state change → API call → re-render, using real function/component names.
+                4. **State management approach** – what hooks/context/libraries are used and why (based on the actual code patterns).
+                5. **Build & tooling** – real scripts, real compiler options from tsconfig (strict mode, paths aliases, etc.).
+                6. **Notable design decisions** – patterns you observe in the code worth calling out (e.g. custom hooks for data fetching, error boundary usage, etc.).
+
+                Ground every claim in the actual source.
+              """).strip() + footer("Architecture"),
+            },
+
+            # 3. API Endpoints
+            {
+              "filename": "API-Endpoints.md",
+              "user_prompt": textwrap.dedent(f"""
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                ---
+
+                Write the **API Endpoints & Data Fetching** wiki page. Include:
+
+                1. **Endpoint inventory** – find every HTTP call in the codebase. For each one, produce a table row:
+                   | Method | URL / Path | Called from (file + function) | Purpose |
+                   Extract the actual URL strings or template literals from the code. If the base URL is a constant or env var, name it.
+
+                2. **Request & response shapes** – for each endpoint, document the TypeScript types used for the request body and response (copy the actual interface/type names and their fields).
+
+                3. **Error handling** – how does the code handle API errors? Show the actual pattern used.
+
+                4. **Authentication** – are tokens/headers set? Where? Copy the relevant code snippet.
+
+                5. **Environment variables** – list every env var related to API configuration (REACT_APP_*, etc.) found in the code.
+
+                If there are NO API calls, say so and document the local data patterns instead.
+
+                Only document endpoints that actually exist in the code.
+              """).strip() + footer("API-Endpoints"),
+            },
+
+            # 4. Components
+            {
+              "filename": "Components.md",
+              "user_prompt": textwrap.dedent(f"""
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                ---
+
+                Write the **Components** wiki page. Include:
+
+                1. **Component inventory** – every exported React component. For each:
+                   - File path
+                   - Component name
+                   - Props interface (copy the actual TypeScript interface/type)
+                   - What it renders and its responsibility in the UI
+                   - Key state (useState calls and what they track)
+                   - Side effects (useEffect calls and when they fire)
+
+                2. **Component hierarchy** – which components render which (parent → child tree).
+                   Use indented text or a mermaid diagram.
+
+                3. **Custom hooks** – list any custom hooks (files/functions starting with `use`).
+                   For each: signature, parameters, return value, and what it encapsulates.
+
+                4. **Shared/reusable patterns** – any components or hooks used in multiple places.
+
+                5. **Styling approach** – CSS modules, styled-components, Tailwind, etc. – whatever is actually used.
+
+                Use real code snippets (props interfaces, key JSX blocks) to make this concrete.
+              """).strip() + footer("Components"),
+            },
+
+            # 5. Data Models
+            {
+              "filename": "Data-Models.md",
+              "user_prompt": textwrap.dedent(f"""
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                ---
+
+                Write the **Data Models & Types** wiki page. Include:
+
+                1. **All TypeScript interfaces and types** – copy every `interface` and `type` definition from the codebase, organised by domain/feature. For each, explain what it represents in the business context.
+
+                2. **Enums** – list every `enum`, its values, and where it is used.
+
+                3. **Type relationships** – if types reference each other, show the relationship
+                   (e.g. `MoodEntry` contains `MoodType` enum, used by `MoodList` component).
+
+                4. **Data validation** – any runtime validation logic (Zod, Yup, manual checks) found in the code.
+
+                5. **Local storage / persistence schema** – if the app persists data to localStorage, sessionStorage, or IndexedDB, document the keys and shapes.
+
+                Copy the actual type/interface definitions verbatim as code blocks.
+              """).strip() + footer("Data-Models"),
+            },
+
+            # 6. Business Logic
+            {
+              "filename": "Business-Logic.md",
+              "user_prompt": textwrap.dedent(f"""
+                ALL SOURCE FILES:
+                {all_src_text}
+
+                ---
+
+                Write the **Business Logic** wiki page. This page documents the non-trivial logic that makes this application work, beyond simple CRUD.
+
+                1. **Core domain concepts** – what real-world concepts does this app model? (e.g. "mood entries", "streaks", "averages") Derive from the code.
+
+                2. **Key algorithms & calculations** – any sorting, scoring, aggregation, date math, streak calculations, etc. For each:
+                   - What it computes
+                   - The actual function name and file
+                   - A short explanation of the algorithm with a real code snippet
+
+                3. **Validation rules** – any business rules enforced in the code (e.g. "a mood rating must be 1–5", "entries cannot be in the future").
+
+                4. **Feature flags / configuration** – any constants or env vars that toggle behaviour.
+
+                5. **Edge cases handled** – places in the code where edge cases are explicitly handled (empty states, error states, loading states).
+
+                6. **Changed files in this commit** (for context):
+                {changed_list}
+
+                Only describe logic that actually exists. Quote real function names and file paths.
+              """).strip() + footer("Business-Logic"),
+            },
+          ]
+
+          # ── Generate each page ───────────────────────────────────────────
+          for page in pages:
+            print(f"\n→ Generating {page['filename']} ...", flush=True)
+            try:
+              content = call_claude(BASE_SYSTEM, page["user_prompt"], max_tokens=4096)
+              dest = out_dir / page["filename"]
+              dest.write_text(content, encoding="utf-8")
+              print(f"  ✓ {dest} ({len(content):,} chars)")
+            except Exception as e:
+              print(f"  ✗ Failed: {e}", file=sys.stderr)
+              # Write a minimal error page so the wiki doesn't silently lose a page
+              (out_dir / page["filename"]).write_text(
+                f"# {page['filename'].replace('-', ' ').replace('.md','')}\n\n"
+                f"⚠️ Documentation generation failed for this run.\n\nError: `{e}`\n"
+              )
+            time.sleep(2)   # gentle rate-limit buffer between calls
+
+          print("\n✅ All pages generated.")
+          PYTHON
+
+      # ── 5. Checkout wiki and apply generated pages ────────────────────────
       - name: Checkout wiki
-        uses: actions/checkout@v3
+        if: steps.files.outputs.no_changes != 'true'
+        uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}.wiki
-          path: wiki-temp
+          path: wiki-repo
 
-      # ─────────────────────────────────────────────
-      # STEP 3 – Generate per-component wiki pages
-      # ─────────────────────────────────────────────
-      - name: Generate component documentation via GitHub Copilot (Models API)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMPONENT_FOLDERS_B64: ${{ steps.discover.outputs.component_folders_b64 }}
-          CHANGED_COMPONENTS: ${{ steps.discover.outputs.changed_components }}
-          COMPONENTS_ROOT: ${{ steps.discover.outputs.components_root }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_ACTOR: ${{ github.actor }}
+      - name: Apply generated pages to wiki
+        if: steps.files.outputs.no_changes != 'true'
         run: |
-          cat > /tmp/generate-docs.js << 'NODESCRIPT'
-          const fs   = require('fs');
-          const path = require('path');
+          # Copy every generated page into the wiki repo.
+          # Pages NOT touched this run are left untouched (incremental updates).
+          for file in /tmp/wiki-pages/*.md; do
+            page=$(basename "$file")
+            cp "$file" "wiki-repo/$page"
+            echo "  copied → $page"
+          done
 
-          // GitHub Models / Copilot API — uses the built-in GITHUB_TOKEN, no extra secret needed.
-          // The endpoint is the Azure-compatible OpenAI endpoint surfaced by GitHub Models.
-          const GH_TOKEN              = process.env.GH_TOKEN;
-          const COMPONENT_FOLDERS_B64 = process.env.COMPONENT_FOLDERS_B64 || '';
-          const CHANGED_COMPONENTS    = (process.env.CHANGED_COMPONENTS || '').split(',').filter(Boolean);
-          const COMPONENTS_ROOT       = process.env.COMPONENTS_ROOT;
-          const GITHUB_RUN_ID         = process.env.GITHUB_RUN_ID;
-          const GITHUB_SERVER_URL     = process.env.GITHUB_SERVER_URL;
-          const GITHUB_REPOSITORY     = process.env.GITHUB_REPOSITORY;
-          const GITHUB_ACTOR          = process.env.GITHUB_ACTOR;
-
-          // ── helpers ──────────────────────────────────────────────────────────────
-
-          function readFolderContents(folderPath) {
-            const files = {};
-            function walk(dir) {
-              let entries;
-              try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-              catch { return; }
-              for (const entry of entries) {
-                const full = path.join(dir, entry.name);
-                if (entry.isDirectory()) {
-                  walk(full);
-                } else if (/\.(ts|tsx|css|scss|json)$/.test(entry.name)) {
-                  try { files[full] = fs.readFileSync(full, 'utf8'); }
-                  catch { files[full] = '(unreadable)'; }
-                }
-              }
-            }
-            walk(folderPath);
-            return files;
-          }
-
-          function buildPrompt(componentName, files) {
-            const fileList = Object.entries(files)
-              .map(([p, c]) => `### File: ${p}\n\`\`\`\n${c.slice(0, 6000)}\n\`\`\``)
-              .join('\n\n');
-
-            return `You are a senior TypeScript / React developer writing GitHub Wiki documentation.
-          Analyse the source code below for the "${componentName}" component and produce a single Markdown wiki page.
-
-          The page MUST include these sections (use ## headings):
-          1. **Overview** – one paragraph describing what this component does and its purpose in the app.
-          2. **File Structure** – table listing each file in the folder and its role.
-          3. **Props & Interfaces** – document every exported TypeScript interface / type, including each field, its type and a short description.
-          4. **State & Hooks** – list all useState / useReducer / custom hooks with what they track and when they update.
-          5. **Key Logic** – explain the most important business logic, algorithms, or side effects (useEffect, event handlers, data transforms).
-          6. **API / Data Fetching** – document every fetch / axios / service call: method, URL/endpoint, request shape, response shape, and how the data is used.
-          7. **Rendered Output** – describe the UI structure and any conditional rendering rules.
-          8. **Dependencies** – list external packages imported and why each is used.
-          9. **Usage Example** – a realistic JSX snippet showing how to use the component.
-
-          Write in clear technical prose. Use tables and code blocks liberally. Do NOT add a top-level H1 title – the wiki will supply it.
-
-          --- SOURCE FILES ---
-          ${fileList}`;
-          }
-
-          // GitHub Models API — OpenAI-compatible chat completions endpoint.
-          // Uses the workflow's built-in GITHUB_TOKEN; no extra secrets required.
-          // Model: gpt-4o is the default Copilot model available via GitHub Models.
-          // If your org has a different model configured (e.g. o3, o4-mini), change the
-          // `model` field below to match.
-          async function callCopilot(prompt) {
-            const resp = await fetch('https://models.inference.ai.azure.com/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${GH_TOKEN}`,
-              },
-              body: JSON.stringify({
-                model: 'gpt-4o',
-                max_tokens: 4096,
-                messages: [
-                  {
-                    role: 'system',
-                    content: 'You are a senior TypeScript/React developer. Write clear, accurate GitHub Wiki documentation from source code. Use Markdown with tables and code blocks. Be thorough but concise.',
-                  },
-                  { role: 'user', content: prompt },
-                ],
-              }),
-            });
-
-            if (!resp.ok) {
-              const err = await resp.text();
-              throw new Error(`GitHub Models API error ${resp.status}: ${err}`);
-            }
-
-            const data = await resp.json();
-            return data.choices[0].message.content;
-          }
-
-          // ── main ─────────────────────────────────────────────────────────────────
-
-          async function main() {
-            if (!COMPONENT_FOLDERS_B64) {
-              console.log('No component folders found. Skipping.');
-              return;
-            }
-
-            const foldersRaw = Buffer.from(COMPONENT_FOLDERS_B64, 'base64').toString('utf8').trim();
-            const folders    = foldersRaw.split('\n').filter(Boolean);
-
-            console.log(`\nProcessing ${folders.length} component folder(s).`);
-            console.log(`Components changed in last commit: ${CHANGED_COMPONENTS.join(', ') || 'none'}\n`);
-
-            const wikiDir  = 'wiki-temp';
-            const runUrl   = `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;
-            const timestamp = new Date().toISOString();
-
-            // Keep track of generated page names for the index
-            const generatedPages = [];
-
-            for (const folderPath of folders) {
-              const componentName = path.basename(folderPath);
-              const wikiPageName  = `Component-${componentName}`;
-              const wikiFilePath  = path.join(wikiDir, `${wikiPageName}.md`);
-
-              const pageExists = fs.existsSync(wikiFilePath);
-
-              // Skip if page exists AND component not in last-commit diff
-              if (pageExists && !CHANGED_COMPONENTS.includes(componentName)) {
-                console.log(`⏭  ${componentName}: page exists, no changes in last commit – skipping.`);
-                generatedPages.push({ componentName, wikiPageName, status: 'unchanged' });
-                continue;
-              }
-
-              const action = pageExists ? 'Updating' : 'Creating';
-              console.log(`🔍 ${action} documentation for: ${componentName}`);
-
-              const files = readFolderContents(folderPath);
-              if (Object.keys(files).length === 0) {
-                console.log(`   ⚠️  No .ts/.tsx/.css files found – skipping.`);
-                continue;
-              }
-
-              const prompt   = buildPrompt(componentName, files);
-              let   docBody;
-              try {
-                docBody = await callCopilot(prompt);
-              } catch (err) {
-                console.error(`   ❌ GitHub Models API call failed: ${err.message}`);
-                continue;
-              }
-
-              const header = [
-                `# ${componentName}`,
-                '',
-                `> **Last Updated**: ${timestamp}  `,
-                `> **Updated By**: Automated Workflow – [Run #${GITHUB_RUN_ID}](${runUrl})  `,
-                `> **Triggered By**: ${GITHUB_ACTOR}`,
-                '',
-                '---',
-                '',
-              ].join('\n');
-
-              fs.writeFileSync(wikiFilePath, header + docBody);
-              console.log(`   ✅ ${wikiFilePath} written.`);
-              generatedPages.push({ componentName, wikiPageName, status: pageExists ? 'updated' : 'created' });
-            }
-
-            // ── Update / create the Components Index page ───────────────────────
-            const indexPath = path.join(wikiDir, 'Components.md');
-            const allWikiPages = fs.readdirSync(wikiDir)
-              .filter(f => f.startsWith('Component-') && f.endsWith('.md'))
-              .map(f => f.replace('.md', ''));
-
-            const indexRows = allWikiPages
-              .sort()
-              .map(p => {
-                const compName = p.replace('Component-', '');
-                const info     = generatedPages.find(g => g.componentName === compName);
-                const badge    = info ? (info.status === 'created' ? ' 🆕' : info.status === 'updated' ? ' 🔄' : '') : '';
-                return `| [[${compName}|${p}]] | \`mood-tracker/client/src/components/${compName}/\` |${badge} |`;
-              })
-              .join('\n');
-
-            const indexContent = [
-              '# Components',
-              '',
-              `> **Last Updated**: ${timestamp}  `,
-              `> **Workflow Run**: [Run #${GITHUB_RUN_ID}](${runUrl})`,
-              '',
-              '---',
-              '',
-              'This page is the index of all React components in the Mood Tracker application.',
-              'Each row links to a dedicated wiki page with full documentation auto-generated from source code.',
-              '',
-              '| Component | Source Path | Status |',
-              '|-----------|-------------|--------|',
-              indexRows,
-              '',
-              '---',
-              '',
-              '🆕 = new page created this run &nbsp;&nbsp; 🔄 = updated this run',
-            ].join('\n');
-
-            fs.writeFileSync(indexPath, indexContent);
-            console.log(`\n📄 Components index updated: ${indexPath}`);
-
-            // Summary to stdout for the next step
-            console.log('\n::SUMMARY_START::');
-            console.log(JSON.stringify(generatedPages));
-            console.log('::SUMMARY_END::');
-          }
-
-          main().catch(err => {
-            console.error('Fatal:', err);
-            process.exit(1);
-          });
-          NODESCRIPT
-
-          node /tmp/generate-docs.js
-
-      # ─────────────────────────────────────────────
-      # STEP 4 – Commit & push wiki
-      # ─────────────────────────────────────────────
-      - name: Commit and push wiki changes
+      - name: Commit and push wiki
+        if: steps.files.outputs.no_changes != 'true'
         run: |
-          cd wiki-temp
+          cd wiki-repo
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add -A
 
-          CHANGED="${{ steps.discover.outputs.changed_components }}"
-          if [ -n "$CHANGED" ]; then
-            COMMIT_MSG="docs: Update wiki for changed components: $CHANGED"
-          else
-            COMMIT_MSG="docs: Update wiki – manual trigger by ${{ github.actor }}"
-          fi
-
           if git diff --cached --quiet; then
-            echo "✅ No wiki changes – documentation already up to date."
+            echo "✅ Wiki already up to date – no commit needed."
           else
-            git commit -m "$COMMIT_MSG [skip ci]"
+            EVENT="${{ github.event_name }}"
+            if [[ "$EVENT" == "push" ]]; then
+              MSG="docs: AI analysis of ${{ github.event.head_commit.message }} (${{ github.sha }})"
+            else
+              MSG="docs: Manual full rebuild by ${{ github.actor }}"
+            fi
+            git commit -m "$MSG [skip ci]"
             git push
-            echo "✅ Wiki updated successfully!"
+            echo "✅ Wiki pushed successfully."
           fi
 
-      # ─────────────────────────────────────────────
-      # STEP 5 – Job summary
-      # ─────────────────────────────────────────────
+      # ── 6. Job summary ────────────────────────────────────────────────────
       - name: Write job summary
+        if: always()
         run: |
-          echo "## 📚 Wiki Documentation Update" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | Manual dispatch by **${{ github.actor }}** |" >> $GITHUB_STEP_SUMMARY
-          echo "| Components changed in last commit | \`${{ steps.discover.outputs.changed_components || 'none' }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### What happened" >> $GITHUB_STEP_SUMMARY
-          echo "- Each folder under \`mood-tracker/client/src/components/\` gets its own wiki page" >> $GITHUB_STEP_SUMMARY
-          echo "- Pages for components **not** changed in the last commit were skipped" >> $GITHUB_STEP_SUMMARY
-          echo "- Pages for **new** component folders were created" >> $GITHUB_STEP_SUMMARY
-          echo "- The **Components** index page was refreshed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View Wiki](${{ github.server_url }}/${{ github.repository }}/wiki)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 📚 AI Wiki Documentation Update"
+            echo ""
+            if [[ "${{ steps.files.outputs.no_changes }}" == "true" ]]; then
+              echo "ℹ️ No relevant source changes detected – wiki was not updated."
+            else
+              echo "| | |"
+              echo "|---|---|"
+              echo "| **Trigger** | ${{ github.event_name }} |"
+              echo "| **Commit** | \`${{ github.sha }}\` |"
+              echo "| **Message** | ${{ github.event.head_commit.message }} |"
+              echo "| **Actor** | ${{ github.actor }} |"
+              echo ""
+              echo "### Updated Wiki Pages"
+              for page in Home Architecture API-Endpoints Components Data-Models Business-Logic; do
+                echo "- [[$page]]"
+              done
+              echo ""
+              echo "[View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
