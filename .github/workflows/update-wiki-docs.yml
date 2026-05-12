@@ -1,16 +1,10 @@
-
----
-
-**`.github/workflows/wiki_documentation_incremental.yaml`**
-
-```yaml
-name: Wiki Documentation — Incremental Update
+name: Wiki Documentation - Incremental Update
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Dry run — generate but do NOT push to wiki"
+        description: "Dry run - generate but do NOT push to wiki"
         required: false
         default: "false"
         type: boolean
@@ -94,7 +88,7 @@ jobs:
         run: |
           echo "## Wiki Incremental Update" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.check.outputs.skip }}" = "true" ]; then
-            echo "No relevant changes — skipped" >> $GITHUB_STEP_SUMMARY
+            echo "No relevant changes - skipped" >> $GITHUB_STEP_SUMMARY
           else
             echo "Updated pages:" >> $GITHUB_STEP_SUMMARY
             for f in /tmp/wiki-pages/*.md 2>/dev/null; do
