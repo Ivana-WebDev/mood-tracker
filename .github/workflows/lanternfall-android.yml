@@ -1,0 +1,83 @@
+name: Lanternfall – Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "lanternfall/**"
+      - ".github/workflows/lanternfall-android.yml"
+  pull_request:
+    paths:
+      - "lanternfall/**"
+
+env:
+  GODOT_VERSION: "4.3"
+  PROJECT_DIR: lanternfall
+
+jobs:
+  test:
+    name: Headless logic tests
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import project
+        run: godot --headless --editor --quit --path "$PROJECT_DIR" || true
+      - name: Simulated runs (AutoPlay bot)
+        run: godot --headless --path "$PROJECT_DIR" res://tests/AutoPlay.tscn
+
+  android:
+    name: Export Android APK
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image installs templates + editor settings (Android SDK path) under /root;
+      # GitHub Actions runs with HOME=/github/home, so move them into place.
+      - name: Set up export templates and editor settings
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/ ~/.config/
+          cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          cp -r /root/.config/godot ~/.config/godot
+
+      - name: Create debug keystore
+        run: |
+          keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Export debug APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          godot --headless --editor --quit --path "$PROJECT_DIR" || true
+          godot --headless --path "$PROJECT_DIR" --export-debug "Android" "$GITHUB_WORKSPACE/build/Lanternfall-debug.apk"
+          ls -la "$GITHUB_WORKSPACE/build"
+
+      # Optional signed release build: add repository secrets
+      # ANDROID_RELEASE_KEYSTORE_BASE64, ANDROID_RELEASE_KEYSTORE_USER, ANDROID_RELEASE_KEYSTORE_PASSWORD.
+      - name: Export release APK
+        if: ${{ env.HAS_RELEASE_KEY == 'true' }}
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_RELEASE_KEYSTORE_USER }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/release.keystore"
+          godot --headless --path "$PROJECT_DIR" --export-release "Android" "$GITHUB_WORKSPACE/build/Lanternfall-release.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-android
+          path: build/*.apk
+          if-no-files-found: error
