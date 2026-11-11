@@ -6,6 +6,7 @@ signal pressed_at(view: CardView, pos: Vector2)
 signal dragged_to(view: CardView, pos: Vector2)
 signal released_at(view: CardView, pos: Vector2)
 signal tapped(view: CardView)
+signal hover_changed(view: CardView, on: bool)
 
 const CARD_SIZE := Vector2(160, 224)
 const TAP_SLOP := 14.0
@@ -33,6 +34,8 @@ func _init(card_inst: Dictionary = {}, combat = null) -> void:
 
 
 func _ready() -> void:
+	mouse_entered.connect(func(): hover_changed.emit(self, true))
+	mouse_exited.connect(func(): hover_changed.emit(self, false))
 	_desc = Label.new()
 	_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

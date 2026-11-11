@@ -49,6 +49,9 @@ func _ready() -> void:
 	add_child(_toast_box)
 	GameManager.screen_requested.connect(_on_screen_requested)
 	get_tree().set_auto_accept_quit(false)
+	if is_desktop():
+		DisplayServer.window_set_min_size(Vector2i(960, 540))
+		apply_display()
 	_swap("menu", {})
 
 
@@ -171,8 +174,32 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_on_back()
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE:
+			_on_back()
+		elif event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
+			toggle_fullscreen()
+
+
+static func is_desktop() -> bool:
+	return OS.has_feature("pc") or OS.has_feature("web")
+
+
+func apply_display() -> void:
+	if not is_desktop():
+		return
+	var fs: bool = SaveManager.profile.get("fullscreen", false)
+	var mode := DisplayServer.window_get_mode()
+	if fs and mode != DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	elif not fs and mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+func toggle_fullscreen() -> void:
+	SaveManager.profile["fullscreen"] = not SaveManager.profile.get("fullscreen", false)
+	SaveManager.save_profile()
+	apply_display()
 
 
 # ------------------------------------------------------------------ lifecycle
@@ -196,7 +223,9 @@ func _on_back() -> void:
 	if current != null and current.has_method("on_back") and current.on_back():
 		return
 	if current_name == "menu":
-		get_tree().quit()
+		# Back on Android exits from the title screen; on PC, Esc there does nothing (use Quit).
+		if OS.has_feature("mobile"):
+			get_tree().quit()
 		return
 	if GameManager.has_run():
 		open_pause()

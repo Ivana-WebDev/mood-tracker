@@ -20,6 +20,7 @@ func _ready() -> void:
 	col.add_child(UI.label("A roguelike deckbuilder", 20, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
 	var btns := UI.vbox(12)
 	btns.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btns.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	if SaveManager.has_run():
 		btns.add_child(UI.accent_button("Continue Run", _continue, Palette.GOLD, Vector2(320, 64)))
 	btns.add_child(UI.button("New Run", _new_run, Vector2(320, 64)))
@@ -86,6 +87,8 @@ func _fill_settings() -> void:
 	_settings_box.add_child(UI.label("Settings", 30, Palette.GOLD, HORIZONTAL_ALIGNMENT_CENTER))
 	_settings_box.add_child(UI.button("Fast Combat: %s" % ("On" if prof["fast_combat"] else "Off"), _toggle.bind("fast_combat"), Vector2(400, 60)))
 	_settings_box.add_child(UI.button("Screen Shake: %s" % ("On" if prof["screen_shake"] else "Off"), _toggle.bind("screen_shake"), Vector2(400, 60)))
+	if UI.main(self) != null and UI.main(self).is_desktop():
+		_settings_box.add_child(UI.button("Fullscreen: %s  (F11)" % ("On" if prof.get("fullscreen", false) else "Off"), _toggle_fullscreen, Vector2(400, 60)))
 	_settings_box.add_child(UI.label("Statistics", 26, Palette.GOLD, HORIZONTAL_ALIGNMENT_CENTER))
 	_settings_box.add_child(UI.label("Runs: %d    Wins: %d    Best floor: %d" % [int(prof["runs"]), int(prof["wins"]), int(prof["best_floor"])], 18, Palette.TEXT, HORIZONTAL_ALIGNMENT_CENTER))
 	for id in CharacterDatabase.ORDER:
@@ -96,4 +99,9 @@ func _fill_settings() -> void:
 func _toggle(key: String) -> void:
 	SaveManager.profile[key] = not SaveManager.profile[key]
 	SaveManager.save_profile()
+	_fill_settings()
+
+
+func _toggle_fullscreen() -> void:
+	UI.main(self).toggle_fullscreen()
 	_fill_settings()

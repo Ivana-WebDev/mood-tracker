@@ -1,4 +1,4 @@
-name: Lanternfall – Android APK
+name: Lanternfall – Android APK + PC builds
 
 on:
   workflow_dispatch:
@@ -80,4 +80,41 @@ jobs:
         with:
           name: Lanternfall-android
           path: build/*.apk
+          if-no-files-found: error
+
+  desktop:
+    name: Export PC builds (Windows / Linux / macOS)
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+      - name: Export
+        run: |
+          godot --headless --editor --quit --path "$PROJECT_DIR" || true
+          mkdir -p "$GITHUB_WORKSPACE/build/windows" "$GITHUB_WORKSPACE/build/linux" "$GITHUB_WORKSPACE/build/macos"
+          godot --headless --path "$PROJECT_DIR" --export-release "Windows" "$GITHUB_WORKSPACE/build/windows/Lanternfall.exe"
+          godot --headless --path "$PROJECT_DIR" --export-release "Linux" "$GITHUB_WORKSPACE/build/linux/Lanternfall.x86_64"
+          godot --headless --path "$PROJECT_DIR" --export-release "macOS" "$GITHUB_WORKSPACE/build/macos/Lanternfall.zip"
+          chmod +x "$GITHUB_WORKSPACE/build/linux/Lanternfall.x86_64"
+          ls -laR "$GITHUB_WORKSPACE/build"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-windows
+          path: build/windows/Lanternfall.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-linux
+          path: build/linux/Lanternfall.x86_64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-macos
+          path: build/macos/Lanternfall.zip
           if-no-files-found: error

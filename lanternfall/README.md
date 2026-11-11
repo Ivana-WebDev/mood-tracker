@@ -1,6 +1,6 @@
 # Lanternfall
 
-A 2D roguelike deckbuilder for Android, built with **Godot 4.3 (GDScript)**. You fight turn-based card battles, pick a route through branching maps, draft cards, collect relics, and work through **2 Acts** with **3 heroes**. The game runs in landscape and is built for touch.
+A 2D roguelike deckbuilder for **Android and PC (Windows, Linux, macOS)**, built with **Godot 4.3 (GDScript)**. You fight turn-based card battles, pick a route through branching maps, draft cards, collect relics, and work through **2 Acts** with **3 heroes**. The game runs in landscape and is built for touch.
 
 Everything is drawn in code with vector shapes: outlined, cel-shaded characters with idle animation, gradient cards with art matched to each card's effect, layered night-sky landscapes, and hit and spark effects. The project has no texture assets. It's light, scales cleanly to any screen density, and builds straight to an `.apk`.
 
@@ -100,3 +100,31 @@ adb install -r build/Lanternfall-debug.apk
 For a **release** APK, add these repository secrets: `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_USER` and `ANDROID_RELEASE_KEYSTORE_PASSWORD`.
 
 **Preset notes:** the preset uses the standard (non-Gradle) template, so no Android build template has to be installed. Package name is `com.lanternfall.deckbuilder` and min SDK is Godot's default (21). It renders with the **Compatibility (GLES3)** renderer so it runs on the widest range of devices. Orientation is **sensor landscape** (`orientation=4`): always landscape, and it rotates between the two landscape directions.
+
+---
+
+## PC builds (Windows / Linux / macOS)
+
+The same project exports to desktop with the presets **Windows**, **Linux** and **macOS** in `export_presets.cfg`. Each build is a single file with the game data embedded in it.
+
+```bash
+godot --headless --path lanternfall --export-release "Windows" build/windows/Lanternfall.exe
+godot --headless --path lanternfall --export-release "Linux"   build/linux/Lanternfall.x86_64
+godot --headless --path lanternfall --export-release "macOS"   build/macos/Lanternfall.zip
+```
+
+GitHub Actions builds all three on every push and uploads them as the artifacts `Lanternfall-windows`, `Lanternfall-linux` and `Lanternfall-macos`.
+
+**PC controls**
+| Input | Action |
+|---|---|
+| Hover a card | Lifts it so you can read it |
+| Drag a card | Play it (drag attacks onto an enemy) |
+| Click a card, then an enemy | Play it on that enemy |
+| `1`–`9`, `0` | Select a card in your hand (press again to play non-targeted cards) |
+| `E` / `Space` | End turn |
+| Right-click | Cancel the selected card |
+| `Esc` | Pause menu / close overlay |
+| `F11` / `Alt+Enter` | Toggle fullscreen (remembered between sessions) |
+
+**Unsigned builds:** the desktop builds aren't code-signed. Windows SmartScreen may show "Windows protected your PC"; click **More info → Run anyway**. On macOS, unzip the file, then right-click **Lanternfall.app → Open** the first time. On Linux, run `chmod +x Lanternfall.x86_64` first.

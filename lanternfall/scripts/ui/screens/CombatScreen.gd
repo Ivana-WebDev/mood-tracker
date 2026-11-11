@@ -23,6 +23,8 @@ var banner: Label
 var hint: Label
 var _ended := false
 var mech_hud: MechanicHUD
+var hovered: CardView = null
+var _mouse_hover := not DisplayServer.is_touchscreen_available()
 var _float_stack: Dictionary = {} # view -> [last_time, count]
 
 
@@ -109,7 +111,10 @@ func _build_hud() -> void:
 	hint = UI.label("", 18, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER)
 	add_child(hint)
 	if int(GameManager.run["stats"].get("floors", 0)) <= 1:
-		hint.text = "Drag a card upward to play it  ·  Drag attacks onto an enemy  ·  Or tap a card, then tap a target"
+		if DisplayServer.is_touchscreen_available():
+			hint.text = "Drag a card upward to play it  ·  Drag attacks onto an enemy  ·  Or tap a card, then tap a target"
+		else:
+			hint.text = "Drag cards to play  ·  or click a card, then an enemy  ·  1-9 select  ·  E / Space end turn  ·  F11 fullscreen"
 
 
 func _layout() -> void:
@@ -156,6 +161,7 @@ func _sync_hand() -> void:
 			v.dragged_to.connect(_on_card_dragged)
 			v.released_at.connect(_on_card_released)
 			v.tapped.connect(_on_card_tapped)
+			v.hover_changed.connect(_on_card_hover)
 			hand_layer.add_child(v)
 			card_views[int(c["uid"])] = v
 	for uid in card_views.keys():
@@ -213,6 +219,11 @@ func _layout_hand() -> void:
 		var rot := deg_to_rad(off * 3.2)
 		var sc := Vector2.ONE
 		v.z_index = i
+		if v == hovered and v != selected and _mouse_hover and held == null:
+			pos.y = H - ch - 46
+			rot = 0.0
+			sc = Vector2(1.12, 1.12)
+			v.z_index = 25
 		if v == selected:
 			pos.y = H - ch - 64
 			rot = 0.0
@@ -227,6 +238,41 @@ func _layout_hand() -> void:
 
 func _on_card_pressed(_v: CardView, _pos: Vector2) -> void:
 	pass
+
+
+func _on_card_hover(v: CardView, on: bool) -> void:
+	if not _mouse_hover:
+		return
+	if on:
+		hovered = v
+	elif hovered == v:
+		hovered = null
+	_layout_hand()
+
+
+## PC shortcuts: 1-9/0 select a card, E/Space end turn, right-click cancels.
+func _unhandled_input(event: InputEvent) -> void:
+	if _ended or cm == null:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if selected != null:
+			selected = null
+			_layout_hand()
+			_refresh()
+			accept_event()
+		return
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	var k: int = event.keycode
+	if k == KEY_E or k == KEY_SPACE:
+		_on_end_turn()
+		accept_event()
+	elif k >= KEY_0 and k <= KEY_9:
+		var idx := 9 if k == KEY_0 else k - KEY_1
+		var hand: Array = cm.deck.hand
+		if idx < hand.size() and card_views.has(int(hand[idx]["uid"])):
+			_on_card_tapped(card_views[int(hand[idx]["uid"])])
+			accept_event()
 
 
 func _on_card_dragged(v: CardView, pos: Vector2) -> void:

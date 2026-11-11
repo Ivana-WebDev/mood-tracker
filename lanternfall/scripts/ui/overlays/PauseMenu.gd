@@ -24,6 +24,8 @@ func _build() -> void:
 	var prof := SaveManager.profile
 	_box.add_child(UI.button("Fast Combat: %s" % ("On" if prof["fast_combat"] else "Off"), _toggle.bind("fast_combat"), Vector2(360, 64)))
 	_box.add_child(UI.button("Screen Shake: %s" % ("On" if prof["screen_shake"] else "Off"), _toggle.bind("screen_shake"), Vector2(360, 64)))
+	if UI.main(self) != null and UI.main(self).is_desktop():
+		_box.add_child(UI.button("Fullscreen: %s  (F11)" % ("On" if prof.get("fullscreen", false) else "Off"), _toggle_fullscreen, Vector2(360, 64)))
 	if GameManager.has_run():
 		_box.add_child(UI.button("Save & Main Menu", _save_quit, Vector2(360, 64)))
 		var ab := UI.accent_button("Abandon Run" if not _confirming else "Tap again to confirm", _abandon, Palette.BAD, Vector2(360, 64))
@@ -48,3 +50,8 @@ func _abandon() -> void:
 		_build()
 		return
 	GameManager.abandon_run()
+
+
+func _toggle_fullscreen() -> void:
+	UI.main(self).toggle_fullscreen()
+	_build()
