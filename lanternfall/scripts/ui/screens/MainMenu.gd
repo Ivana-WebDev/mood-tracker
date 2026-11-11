@@ -34,7 +34,11 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	draw_backdrop(Palette.GOLD)
+	draw_backdrop(Palette.GOLD, 0.7)
+	var gy := size.y * 0.86
+	IconDraw.creature(self, "clockwright", Vector2(size.x * 0.13, gy - 70), 70, Color(CharacterDatabase.CHARACTERS["clockwright"]["color"]), _t, 1.0)
+	IconDraw.creature(self, "fatebinder", Vector2(size.x * 0.87, gy - 70), 70, Color(CharacterDatabase.CHARACTERS["fatebinder"]["color"]), _t + 1.0, -1.0)
+	IconDraw.creature(self, "duskdancer", Vector2(size.x * 0.75, gy - 40), 50, Color(CharacterDatabase.CHARACTERS["duskdancer"]["color"]), _t + 2.0, -1.0)
 	# Hanging lantern centrepiece.
 	var c := Vector2(size.x / 2.0, 110 + sin(_t * 1.4) * 4.0)
 	draw_line(Vector2(c.x, 0), c + Vector2(0, -40), Palette.LINE, 3.0)

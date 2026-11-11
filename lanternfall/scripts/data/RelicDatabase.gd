@@ -3,12 +3,12 @@ class_name RelicDatabase
 
 const RELICS := {
 	# Starters
-	"iron_oath": {"name": "Iron Oath", "rarity": "starter", "icon": "shield", "color": "e8664f",
-		"desc": "Start each combat with 10 Block."},
-	"smoke_charm": {"name": "Smoke Charm", "rarity": "starter", "icon": "cloud", "color": "8f7bff",
-		"desc": "On your first turn of each combat, draw 2 extra cards."},
-	"ember_core": {"name": "Ember Core", "rarity": "starter", "icon": "orb", "color": "4fc3e8",
-		"desc": "Start each combat with 3 Charge."},
+	"mainspring": {"name": "Mainspring", "rarity": "starter", "icon": "gear", "color": "e0a74a",
+		"desc": "At the start of each combat, deploy a Tick Turret (3 damage, 3 turns)."},
+	"weighted_die": {"name": "Weighted Die", "rarity": "starter", "icon": "die", "color": "b18cff",
+		"desc": "Your Fate Dice never roll below 2."},
+	"silver_bell": {"name": "Silver Bell", "rarity": "starter", "icon": "bell", "color": "3fd6b4",
+		"desc": "Start each combat with 2 Flow."},
 	# Common
 	"whetstone": {"name": "Whetstone", "rarity": "common", "icon": "blade", "color": "b8c0d8",
 		"desc": "Start each combat with 1 Strength."},

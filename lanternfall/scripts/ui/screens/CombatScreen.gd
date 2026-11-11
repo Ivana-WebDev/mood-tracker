@@ -22,6 +22,7 @@ var energy_orb: EnergyOrb
 var banner: Label
 var hint: Label
 var _ended := false
+var mech_hud: MechanicHUD
 var _float_stack: Dictionary = {} # view -> [last_time, count]
 
 
@@ -68,6 +69,7 @@ func _ready() -> void:
 	cm.floating_text.connect(_on_float)
 	cm.attacked.connect(func(who): _view_for(who).play_lunge())
 	cm.was_hit.connect(_on_hit)
+	cm.gadget_fired.connect(_on_gadget_fired)
 	cm.enemy_died.connect(func(who): _view_for(who).play_death())
 	cm.turn_started.connect(_on_turn_started)
 	cm.enemy_turn_started.connect(_on_enemy_turn)
@@ -79,17 +81,23 @@ func _ready() -> void:
 
 
 func _draw() -> void:
-	var accent := Palette.ATTACK if params.get("kind", "") != "monster" else Palette.SKILL
-	draw_backdrop(accent)
-	# Ground plane
-	var gy := size.y * 0.56
-	draw_rect(Rect2(0, gy, size.x, size.y - gy), Color(Palette.BG_2, 0.6))
-	draw_line(Vector2(0, gy), Vector2(size.x, gy), Color(accent, 0.25), 2.0)
+	var kind: String = params.get("kind", "monster")
+	var accent := Palette.SKILL
+	if kind == "elite":
+		accent = Palette.NODE_COLORS["elite"]
+	elif kind == "boss":
+		accent = Palette.NODE_COLORS["boss"]
+	elif int(GameManager.run.get("act", 1)) == 2:
+		accent = Color("ff8a4f")
+	draw_backdrop(accent, 0.56, false, 0.42)
 
 
 func _build_hud() -> void:
 	energy_orb = EnergyOrb.new()
 	add_child(energy_orb)
+	if cm.mechanic != "":
+		mech_hud = MechanicHUD.new(cm)
+		add_child(mech_hud)
 	end_btn = UI.accent_button("End Turn", _on_end_turn, Palette.GOLD, Vector2(170, 64))
 	add_child(end_btn)
 	draw_btn = UI.button("Draw 0", func(): _show_pile("draw"), Vector2(140, 50), 17)
@@ -116,6 +124,12 @@ func _layout() -> void:
 		var cx := region_l + (i + 0.5) * (region_r - region_l) / alive
 		v.position = Vector2(cx - CombatantView.VIEW_SIZE.x / 2.0, H * 0.13)
 	energy_orb.position = Vector2(26, H - 250)
+	if mech_hud:
+		if cm.mechanic == "gadgets":
+			mech_hud.position = Vector2(player_view.position.x + CombatantView.VIEW_SIZE.x + 6, H * 0.13 + 6)
+			mech_hud.size.y = minf(300.0, H * 0.56)
+		else:
+			mech_hud.position = Vector2(16, TopBar.HEIGHT + 40)
 	draw_btn.position = Vector2(16, H - 66)
 	discard_btn.position = Vector2(W - 166, H - 66)
 	exhaust_btn.position = Vector2(W - 166, H - 112)
@@ -379,6 +393,10 @@ func _view_for(who: Combatant) -> CombatantView:
 
 func _on_float(who: Combatant, text: String, color: Color) -> void:
 	var v := _view_for(who)
+	if text.begins_with("+") and color == Palette.BLOCK:
+		HitFX.spawn(fx_layer, _fx_at(who), "block", Palette.BLOCK)
+	elif text.begins_with("+") and color == Palette.GOOD:
+		HitFX.spawn(fx_layer, _fx_at(who), "heal", Palette.GOOD)
 	var l := UI.label(text, 26 if text.begins_with("-") else 20, color, HORIZONTAL_ALIGNMENT_CENTER)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	l.add_theme_constant_override("font_outline_size", 6)
@@ -387,7 +405,7 @@ func _on_float(who: Combatant, text: String, color: Color) -> void:
 	var st: Array = _float_stack.get(v, [0.0, 0])
 	var count: int = st[1] + 1 if now - float(st[0]) < 0.35 else 0
 	_float_stack[v] = [now, count]
-	var base := v.position + Vector2(v.size.x / 2.0 - 110 + randf_range(-16, 16), 90 + count * 30)
+	var base := v.position + Vector2(v.size.x / 2.0 - 110 + randf_range(-16, 16), v.body_center().y - 30.0 + count * 30)
 	l.position = base
 	fx_layer.add_child(l)
 	var tw := l.create_tween()
@@ -397,8 +415,28 @@ func _on_float(who: Combatant, text: String, color: Color) -> void:
 	tw.chain().tween_callback(l.queue_free)
 
 
+func _fx_at(who: Combatant) -> Vector2:
+	var v := _view_for(who)
+	return v.position + v.body_center()
+
+
+func _on_gadget_fired(i: int) -> void:
+	if mech_hud == null or i >= cm.gadgets.size():
+		return
+	var g: Dictionary = cm.gadgets[i]
+	var from := mech_hud.position + mech_hud.slot_center(i)
+	var col := Color(CardDatabase.GADGETS[g["kind"]]["color"])
+	if g["kind"] in ["barrier", "drone"]:
+		HitFX.spawn(fx_layer, _fx_at(cm.player), "block" if g["kind"] == "barrier" else "heal", col)
+	else:
+		var alive := cm.alive_enemies()
+		var tgt: Vector2 = _fx_at(alive[0]) if not alive.is_empty() else from + Vector2(300, 0)
+		HitFX.spawn(fx_layer, from, "zap", col, tgt)
+
+
 func _on_hit(who: Combatant) -> void:
 	_view_for(who).play_hit()
+	HitFX.spawn(fx_layer, _fx_at(who), "slash", Palette.HP.lightened(0.3) if who.is_player else Palette.GOLD)
 	if who.is_player and SaveManager.profile.get("screen_shake", true):
 		var tw := world.create_tween()
 		for i in 4:
@@ -466,9 +504,18 @@ class EnergyOrb extends Control:
 
 	func _draw() -> void:
 		var c := size / 2.0
-		var glow := 0.5 + 0.5 * sin(_t * 3.0) if energy > 0 else 0.0
-		draw_circle(c, 52, Color(Palette.ENERGY, 0.12 + glow * 0.1))
-		draw_circle(c, 44, Palette.BG_2)
-		draw_arc(c, 44, 0, TAU, 48, Palette.ENERGY if energy > 0 else Palette.LINE, 4.0, true)
-		IconDraw.icon(self, "bolt", c + Vector2(0, -22), 10, Palette.ENERGY)
-		draw_string(UI.font(), c + Vector2(-50, 18), "%d/%d" % [energy, max_energy], HORIZONTAL_ALIGNMENT_CENTER, 100, 30, Palette.TEXT)
+		var on := energy > 0
+		var glow := 0.5 + 0.5 * sin(_t * 3.0) if on else 0.0
+		IconDraw.glow(self, c, 58 + glow * 4.0, Palette.ENERGY if on else Palette.LINE, 5)
+		draw_circle(c, 47, IconDraw.OUTLINE)
+		draw_circle(c, 44, Palette.ENERGY.darkened(0.55) if on else Palette.BG_2)
+		draw_circle(c + Vector2(-3, -3), 38, Palette.ENERGY.darkened(0.25) if on else Palette.PANEL)
+		# swirling inner flame
+		for i in 6:
+			var a := _t * 1.5 + i * TAU / 6.0
+			draw_circle(c + Vector2(cos(a), sin(a)) * 22.0, 5.0, Color(Palette.ENERGY.lightened(0.3), 0.35 if on else 0.08))
+		draw_arc(c, 44, 0, TAU, 48, Palette.ENERGY if on else Palette.LINE, 3.0, true)
+		draw_circle(c + Vector2(-16, -18), 7, Color(1, 1, 1, 0.25))
+		IconDraw.icon(self, "bolt", c + Vector2(0, -24), 9, Palette.ENERGY.lightened(0.3))
+		draw_string_outline(UI.font(), c + Vector2(-50, 16), "%d/%d" % [energy, max_energy], HORIZONTAL_ALIGNMENT_CENTER, 100, 30, 5, Color(0, 0, 0, 0.7))
+		draw_string(UI.font(), c + Vector2(-50, 16), "%d/%d" % [energy, max_energy], HORIZONTAL_ALIGNMENT_CENTER, 100, 30, Palette.TEXT)

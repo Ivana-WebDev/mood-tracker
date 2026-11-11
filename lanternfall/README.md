@@ -2,7 +2,7 @@
 
 A 2D roguelike deckbuilder for Android, built with **Godot 4.3 (GDScript)**. You fight turn-based card battles, pick a route through branching maps, draft cards, collect relics, and work through **2 Acts** with **3 heroes**. The game runs in landscape and is built for touch.
 
-Everything is drawn with vector primitives (`draw_*` calls and StyleBoxes), so the project has no texture assets. It's light, scales cleanly to any screen density, and builds straight to an `.apk`.
+Everything is drawn in code with vector shapes: outlined, cel-shaded characters with idle animation, gradient cards with art matched to each card's effect, layered night-sky landscapes, and hit and spark effects. The project has no texture assets. It's light, scales cleanly to any screen density, and builds straight to an `.apk`.
 
 ---
 
@@ -10,8 +10,8 @@ Everything is drawn with vector primitives (`draw_*` calls and StyleBoxes), so t
 
 | System | Details |
 |---|---|
-| **Heroes** | **Warden** (Block, Strength, block-to-damage), **Shade** (Bleed, Knives, card draw), **Arcanist** (stores Charge, then spends it all on finishers). Each has a 10-card starter deck, a starter relic and 18–19 class cards. |
-| **Cards** | 64 cards in total: 55 class cards, 6 neutral cards, 1 token, and 2 statuses/curses. Each card is a list of effects defined as data. Upgrades are written into the card definition, and card text is generated from the effects, showing live numbers that include Strength, Weak and Vulnerable. |
+| **Heroes** | **Clockwright** deploys **Gadgets** (turrets, barrier nodes, tesla coils, repair drones, a siege cannon) into 3 slots; they fire on their own each turn and *Overclock* cards fire them early. **Fatebinder** rolls 3 **Fate Dice** each turn and spends, rerolls and reshapes them. **Duskdancer** builds **Flow** by alternating card types; Flow boosts every hit and every Block, and repeating a type breaks it. Each hero has a 10-card starter deck, a starter relic and 20 class cards. |
+| **Cards** | 68 cards in total: 60 class cards, 6 neutral cards and 2 statuses/curses. Each card is a list of effects defined as data. Upgrades are written into the card definition, and card text is generated from the effects, showing live numbers that include Strength, Weak and Vulnerable. |
 | **Combat** | Energy, draw/discard/exhaust piles, Block, and enemy intents with damage previews. Statuses: Strength, Dexterity, Vulnerable, Weak, Bleed, Thorns, Charge, Ritual, Regen, plus power effects such as Bulwark, Steadfast, Rising Fury, Serrated, Phantom Blades, Overflow and Ley Line. |
 | **Enemies** | 15 enemies: 9 normal, 4 elite, 2 bosses (*The Hollow King* and *The Lantern Wyrm*). Each follows a cycling or weighted-random move pattern. |
 | **Map** | Generated per act: 12 floors plus a boss, 7 lanes, 6 paths that never cross. Node types: monster, elite, event, rest, shop, treasure, boss. The map scrolls horizontally to suit landscape screens. |
@@ -41,7 +41,8 @@ lanternfall/
 │   │   ├── DeckManager.gd     # draw / hand / discard / exhaust piles
 │   │   └── Combatant.gd       # HP, block, statuses
 │   ├── data/                  # CardDatabase, EnemyDatabase, RelicDatabase, CharacterDatabase, EventDatabase
-│   └── ui/                    # Palette (design tokens), IconDraw (vector art), CardView, CombatantView,
+│   └── ui/                    # Palette, IconDraw (shaded vector characters/icons), Scenery (backgrounds), HitFX,
+│       │                      # MechanicHUD (gadget bay / dice tray / flow meter), CardView, CombatantView,
 │       ├── screens/           # MainMenu, CharacterSelect, Map, Combat, Reward, Rest, Shop, Event, Treasure, End
 │       └── overlays/          # DeckViewer (view/upgrade/remove), CardChoice, RelicChoice, PauseMenu
 └── tests/

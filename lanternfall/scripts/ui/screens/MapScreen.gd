@@ -111,7 +111,8 @@ class MapView extends Control:
 		var nodes: Array = run["map"]["nodes"]
 		var avail: Array = MapManager.available_nodes(run)
 		var cur := int(run["current_node"])
-		draw_rect(Rect2(Vector2.ZERO, size), Palette.BG)
+		var act_col := Palette.SKILL if int(run["act"]) == 1 else Color("ff8a4f")
+		Scenery.draw(self, size, act_col, _t, 0.94, false, scroll_x)
 		# Parchment-like floor bands
 		for f in int(run["map"]["floors"]):
 			var x := MapScreenConst.MX + f * MapScreenConst.FS - scroll_x
@@ -130,6 +131,8 @@ class MapView extends Control:
 				var col := Palette.GOLD if taken else Color(Palette.TEXT_DIM, 0.35)
 				if n["id"] == cur and avail.has(nid):
 					col = Color(Palette.GOLD, 0.75)
+				if taken:
+					draw_line(a, b, Color(Palette.GOLD, 0.18), 9.0, true)
 				_dashed(a, b, col, 3.0 if taken else 2.0)
 		# Nodes
 		for n in nodes:
@@ -146,7 +149,10 @@ class MapView extends Control:
 			var fill := Palette.PANEL
 			if n["visited"]:
 				fill = col.darkened(0.55)
+			draw_circle(p + Vector2(3, 5), r + 2, Color(0, 0, 0, 0.45))
+			draw_circle(p, r + 2, IconDraw.OUTLINE)
 			draw_circle(p, r, fill)
+			draw_circle(p + Vector2(-r * 0.15, -r * 0.2), r * 0.75, fill.lightened(0.07))
 			var ring := col if (is_avail or n["visited"]) else Color(col, 0.45)
 			draw_arc(p, r, 0, TAU, 40, ring, 3.0, true)
 			if n["id"] == cur:

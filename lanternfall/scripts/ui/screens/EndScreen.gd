@@ -12,7 +12,7 @@ func _ready() -> void:
 	v.add_child(UI.label("VICTORY" if win else "DEFEAT", 64, Palette.GOLD if win else Palette.BAD, HORIZONTAL_ALIGNMENT_CENTER))
 	var sub := "The Lantern Wyrm falls. The road is lit once more." if win else "Your lantern gutters out..."
 	v.add_child(UI.label(sub, 22, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
-	var ch: Dictionary = CharacterDatabase.get_character(run.get("character", "warden"))
+	var ch: Dictionary = CharacterDatabase.get_character(run.get("character", "clockwright"))
 	var p := UI.panel()
 	p.custom_minimum_size = Vector2(520, 0)
 	var g := GridContainer.new()

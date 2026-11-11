@@ -22,11 +22,9 @@ func on_back() -> bool:
 	return false
 
 
-func draw_backdrop(accent: Color) -> void:
-	# Subtle vector backdrop: soft vignette rings + horizon.
-	var s := size
-	draw_rect(Rect2(Vector2.ZERO, s), Palette.BG)
-	for i in 6:
-		var r := s.x * (0.25 + i * 0.12)
-		draw_circle(Vector2(s.x * 0.5, s.y * 1.15), r, Color(accent, 0.035))
-	draw_line(Vector2(0, s.y * 0.62), Vector2(s.x, s.y * 0.62), Color(accent, 0.12), 2.0)
+func _process(_d: float) -> void:
+	queue_redraw()
+
+
+func draw_backdrop(accent: Color, horizon: float = 0.62, lanterns: bool = true, moon_x: float = 0.82) -> void:
+	Scenery.draw(self, size, accent, Time.get_ticks_msec() / 1000.0, horizon, lanterns, 0.0, moon_x)

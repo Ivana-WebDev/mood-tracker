@@ -18,7 +18,7 @@ func _ready() -> void:
 	GameManager.goto("char_select")
 	await _frames(10)
 	await _shot("02_char_select")
-	GameManager.new_run("arcanist", 77)
+	GameManager.new_run("clockwright", 77)
 	await _frames(10)
 	await _shot("03_map")
 	# Enter first combat
@@ -105,6 +105,23 @@ func _ready() -> void:
 	GameManager.goto("combat", p2)
 	await _wait(1.2)
 	await _shot("17_three_enemies")
+	for hero in ["fatebinder", "duskdancer"]:
+		GameManager.new_run(hero, 99)
+		await _frames(4)
+		var pp := {"type": "combat", "kind": "elite", "enemies": ["hex_witch"] if hero == "fatebinder" else ["iron_sentinel"]}
+		GameManager.set_pending(pp)
+		GameManager.goto("combat", pp)
+		await _wait(1.2)
+		var sc = main.current
+		for k in 2:
+			for c in sc.cm.deck.hand:
+				if sc.cm.can_play(c):
+					var tg = sc.cm.alive_enemies()[0] if sc.cm.needs_target(c) else null
+					sc._try_play(sc.card_views[int(c["uid"])], tg)
+					break
+			await _wait(0.35)
+		await _wait(0.3)
+		await _shot("19_combat_" + hero)
 	GameManager.goto("victory", {"run": GameManager.run.duplicate(true)})
 	await _frames(10)
 	await _shot("18_victory")

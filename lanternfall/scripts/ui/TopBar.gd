@@ -27,7 +27,7 @@ func _init() -> void:
 func _ready() -> void:
 	var row := UI.hbox(18, BoxContainer.ALIGNMENT_BEGIN)
 	add_child(row)
-	var ch: Dictionary = CharacterDatabase.get_character(GameManager.run.get("character", "warden"))
+	var ch: Dictionary = CharacterDatabase.get_character(GameManager.run.get("character", "clockwright"))
 	row.add_child(UI.label(ch.get("name", ""), 20, Color(ch.get("color", "ffffff"))))
 	_hp = _stat(row, "heart", Palette.HP)
 	_gold = _stat(row, "coin", Palette.GOLD)

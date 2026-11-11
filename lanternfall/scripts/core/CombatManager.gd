@@ -12,6 +12,13 @@ signal turn_started(turn: int)
 signal enemy_turn_started
 signal enemy_acting(who: Combatant, move_name: String)
 signal combat_ended(victory: bool)
+signal gadgets_changed
+signal gadget_fired(index: int)
+signal dice_changed
+signal flow_broken
+
+const MAX_GADGETS := 3
+const MAX_DICE := 8
 
 const BASE_ENERGY := 3
 const BASE_DRAW := 5
@@ -28,6 +35,11 @@ var cards_played_turn: int = 0
 var cards_played_total: int = 0
 var encounter_type: String = "monster"
 var counters: Dictionary = {}
+## Hero mechanic: "gadgets" | "dice" | "flow"
+var mechanic: String = ""
+var gadgets: Array = []   # [{kind, power, turns}]
+var dice: Array = []      # [int]
+var last_type: String = ""
 ## When true no timers are awaited (used by automated tests / fast combat).
 var fast_mode: bool = false
 ## Multiplier for animation pacing (0.5 = fast combat setting).
@@ -43,6 +55,7 @@ func setup(enemy_ids: Array, kind: String) -> void:
 	player.display_name = CharacterDatabase.get_character(run["character"])["name"]
 	player.max_hp = int(run["max_hp"])
 	player.hp = int(run["hp"])
+	mechanic = CharacterDatabase.mechanic(run["character"])
 	deck = DeckManager.new()
 	deck.setup(run["deck"], rng)
 	enemies.clear()
@@ -65,6 +78,8 @@ func alive_enemies() -> Array:
 
 func calc_damage(base: int, src: Combatant, dst: Combatant) -> int:
 	var d := float(base + src.get_status("strength"))
+	if src.is_player:
+		d += flow_bonus()
 	if src.get_status("weak") > 0:
 		d *= 0.75
 	if dst != null and dst.get_status("vulnerable") > 0:
@@ -77,7 +92,17 @@ func preview_damage(base: int, target) -> int:
 
 
 func preview_block(base: int) -> int:
-	return maxi(0, base + player.get_status("dexterity"))
+	return maxi(0, base + player.get_status("dexterity") + flow_bonus())
+
+
+func flow_bonus() -> int:
+	return player.get_status("flow") * (2 if player.get_status("spotlight") > 0 else 1)
+
+
+func count_of(what: String) -> int:
+	if what == "gadgets":
+		return gadgets.size()
+	return player.get_status(what)
 
 
 func card_def(inst: Dictionary) -> Dictionary:
@@ -140,6 +165,8 @@ func play_card(inst: Dictionary, target: Combatant = null) -> bool:
 	cards_played_total += 1
 	GameManager.run["stats"]["cards_played"] = int(GameManager.run["stats"].get("cards_played", 0)) + 1
 	_resolve_card(c, target)
+	if mechanic == "flow" and phase != "over":
+		_update_flow(c["type"])
 	if c["type"] == "power":
 		pass # Powers leave play permanently.
 	elif c.get("exhaust", false):
@@ -168,6 +195,11 @@ func end_player_turn() -> void:
 	deck.discard_hand()
 	hand_changed.emit()
 	state_changed.emit()
+	if not gadgets.is_empty():
+		await _wait(0.2)
+		await _fire_gadgets_end_of_turn()
+		if phase == "over":
+			return
 	await _enemy_turn()
 	if phase == "over":
 		return
@@ -189,15 +221,17 @@ func start_player_turn() -> void:
 			return
 	max_energy = BASE_ENERGY + RelicManager.bonus_energy() + player.get_status("ley")
 	energy = max_energy
-	var rage := player.get_status("rage")
-	if rage > 0:
-		player.add_status("strength", rage)
-	var overflow := player.get_status("overflow")
-	if overflow > 0:
-		player.add_status("charge", overflow)
+	var rhythm := player.get_status("rhythm")
+	if rhythm > 0:
+		apply_status(player, "flow", rhythm)
+	if mechanic == "dice":
+		dice.clear()
+		for i in 3 + player.get_status("extra_die"):
+			dice.append(roll_die())
+		dice_changed.emit()
+	for i in player.get_status("factory"):
+		deploy_gadget("turret", 2, 2)
 	draw_cards(BASE_DRAW + RelicManager.bonus_draw())
-	for i in player.get_status("phantom"):
-		deck.add_to_hand(make_card("t_knife"))
 	RelicManager.on_turn_start(self)
 	phase = "player"
 	turn_started.emit(turn)
@@ -229,6 +263,10 @@ func gain_block(c: Combatant, amount: int) -> void:
 func apply_status(c: Combatant, status: String, amount: int) -> void:
 	if c == null or not c.is_alive() or amount == 0:
 		return
+	if status == "flow":
+		amount = mini(amount, CardDatabase.FLOW_MAX - c.get_status("flow"))
+		if amount <= 0:
+			return
 	c.add_status(status, amount)
 	var info: Dictionary = CardDatabase.STATUS_INFO.get(status, {"buff": true})
 	floating_text.emit(c, "%s %+d" % [CardDatabase.status_name(status), amount], Palette.BUFF if info["buff"] else Palette.DEBUFF)
@@ -259,10 +297,6 @@ func attack(src: Combatant, dst: Combatant, base: int) -> void:
 	var dmg := calc_damage(base, src, dst)
 	attacked.emit(src)
 	_apply_damage(dst, dmg, true)
-	if src.is_player and dst.is_alive():
-		var serr := src.get_status("serrated")
-		if serr > 0:
-			apply_status(dst, "bleed", serr)
 	var thorns := dst.get_status("thorns")
 	if thorns > 0 and src.is_alive() and phase != "over":
 		_apply_damage(src, thorns, false)
@@ -356,22 +390,198 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 				for i in int(e.get("count", 1)):
 					deck.add_to_hand(make_card(e["card"]))
 				hand_changed.emit()
-			"damage_block":
-				attack(player, target, player.block)
 			"double_block":
 				gain_block(player, player.block)
-			"double_charge":
-				apply_status(player, "charge", player.get_status("charge"))
-			"block_charge":
-				gain_block(player, int(e["value"]) * player.get_status("charge"))
-			"charge_burst":
-				var raw: int = int(e["base"]) + int(e["per"]) * player.get_status("charge")
-				player.set_status("charge", 0)
+			"burst":
+				var raw: int = int(e["base"]) + int(e["per"]) * player.get_status(e["status"])
+				player.set_status(e["status"], 0)
 				for t in _targets(tk, target):
 					attack(player, t, raw)
-			"bleed_burst":
-				if target != null:
-					lose_hp(target, target.get_status("bleed") * int(e["value"]))
+			"block_per":
+				gain_block(player, int(e["value"]) * count_of(e["count"]))
+			"damage_per":
+				attack(player, target, int(e["base"]) + int(e["per"]) * count_of(e["count"]))
+			# --- Gadgets
+			"gadget":
+				deploy_gadget(e["kind"], int(e["power"]), int(e["turns"]))
+			"overclock":
+				for i in int(e["value"]):
+					fire_all_gadgets(false)
+			"wind":
+				for g in gadgets:
+					g["turns"] = int(g["turns"]) + int(e["value"])
+				gadgets_changed.emit()
+			"tune":
+				for g in gadgets:
+					g["power"] = int(g["power"]) + int(e["value"])
+				gadgets_changed.emit()
+			# --- Dice
+			"die_damage":
+				var v := spend_die(e["pick"])
+				attack(player, target, v * int(e["mult"]) + int(e.get("bonus", 0)))
+			"die_block":
+				var v2 := spend_die(e["pick"])
+				gain_block(player, preview_block(v2 * int(e["mult"]) + int(e.get("bonus", 0))))
+			"reroll":
+				for i in dice.size():
+					dice[i] = roll_die()
+				dice_changed.emit()
+			"add_die":
+				for i in int(e.get("count", 1)):
+					if dice.size() < MAX_DICE:
+						dice.append(int(e["value"]) if int(e.get("value", 0)) > 0 else roll_die())
+				dice_changed.emit()
+			"bump":
+				for i in dice.size():
+					dice[i] = mini(6, int(dice[i]) + int(e["value"]))
+				dice_changed.emit()
+			"set_low":
+				if not dice.is_empty():
+					dice[_die_index("low")] = int(e["value"])
+					dice_changed.emit()
+			"set_all":
+				for i in dice.size():
+					dice[i] = int(e["value"])
+				dice_changed.emit()
+			"double_high":
+				if not dice.is_empty():
+					var hi := _die_index("high")
+					dice[hi] = int(dice[hi]) * 2
+					dice_changed.emit()
+			"dice_sum":
+				var total := 0
+				while not dice.is_empty():
+					total += spend_die("high")
+				attack(player, target, total * int(e["mult"]) + int(e.get("base", 0)))
+
+
+# ------------------------------------------------------------------ hero mechanics
+
+func deploy_gadget(kind: String, power: int, turns: int) -> void:
+	power += player.get_status("amplify")
+	if gadgets.size() >= MAX_GADGETS:
+		# The oldest gadget fires one last time as it is pushed out.
+		gadget_fired.emit(0)
+		_fire_gadget(gadgets[0])
+		gadgets.remove_at(0)
+	gadgets.append({"kind": kind, "power": power, "turns": turns})
+	floating_text.emit(player, CardDatabase.GADGETS[kind]["name"], Color(CardDatabase.GADGETS[kind]["color"]))
+	gadgets_changed.emit()
+
+
+func fire_all_gadgets(wind_down: bool) -> void:
+	for i in gadgets.size():
+		if phase == "over":
+			return
+		gadget_fired.emit(i)
+		_fire_gadget(gadgets[i])
+	if wind_down:
+		_wind_down()
+	gadgets_changed.emit()
+
+
+func _fire_gadgets_end_of_turn() -> void:
+	for i in gadgets.size():
+		if phase == "over":
+			return
+		gadget_fired.emit(i)
+		_fire_gadget(gadgets[i])
+		await _wait(0.28)
+	_wind_down()
+	gadgets_changed.emit()
+
+
+func _wind_down() -> void:
+	if player.get_status("perpetual") > 0:
+		return
+	for g in gadgets:
+		g["turns"] = int(g["turns"]) - 1
+	gadgets = gadgets.filter(func(g): return int(g["turns"]) > 0)
+
+
+func _fire_gadget(g: Dictionary) -> void:
+	var p := int(g["power"])
+	match g["kind"]:
+		"turret":
+			var t := _targets("random", null)
+			for e in t:
+				_gadget_hit(e, p)
+		"tesla":
+			for e in alive_enemies():
+				_gadget_hit(e, p)
+		"cannon":
+			var alive := alive_enemies()
+			if not alive.is_empty():
+				alive.sort_custom(func(a, b): return a.hp > b.hp)
+				_gadget_hit(alive[0], p)
+		"barrier":
+			gain_block(player, p)
+		"drone":
+			heal(player, p)
+
+
+func _gadget_hit(e: Combatant, p: int) -> void:
+	if phase == "over" or not e.is_alive():
+		return
+	var d := float(p)
+	if e.get_status("vulnerable") > 0:
+		d *= 1.5
+	_apply_damage(e, int(d), false)
+
+
+func roll_die() -> int:
+	var v := rng.randi_range(1, 6)
+	if RelicManager.has("weighted_die"):
+		v = maxi(v, 2)
+	return mini(6, v + player.get_status("lucky"))
+
+
+func _die_index(pick: String) -> int:
+	var idx := 0
+	for i in dice.size():
+		if (pick == "high" and int(dice[i]) > int(dice[idx])) or (pick == "low" and int(dice[i]) < int(dice[idx])):
+			idx = i
+	return idx
+
+
+func peek_die(pick: String) -> int:
+	return 0 if dice.is_empty() else int(dice[_die_index(pick)])
+
+
+func dice_total() -> int:
+	var t := 0
+	for d in dice:
+		t += int(d)
+	return t
+
+
+func spend_die(pick: String) -> int:
+	if dice.is_empty():
+		return 0
+	var i := _die_index(pick)
+	var v: int = int(dice[i])
+	dice.remove_at(i)
+	var fs := player.get_status("fate_six")
+	if v >= 6 and fs > 0:
+		energy += fs
+		draw_cards(fs)
+		floating_text.emit(player, "Critical!", Palette.GOLD)
+	dice_changed.emit()
+	return v
+
+
+func _update_flow(card_type: String) -> void:
+	if last_type == "" or card_type != last_type:
+		apply_status(player, "flow", 1)
+	elif player.get_status("flow") > 0:
+		if player.get_status("grace") > 0:
+			player.add_status("flow", -1)
+		else:
+			player.set_status("flow", 0)
+			floating_text.emit(player, "Flow broken", Palette.BAD)
+			flow_broken.emit()
+	last_type = card_type
+	state_changed.emit()
 
 
 # ------------------------------------------------------------------ enemy AI

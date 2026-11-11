@@ -33,8 +33,8 @@ func _ready() -> void:
 
 
 func _test_save_roundtrip() -> void:
-	GameManager.new_run("shade", 42)
-	GameManager.add_card("s_hemorrhage", true)
+	GameManager.new_run("fatebinder", 42)
+	GameManager.add_card("f_all_in", true)
 	var before: Dictionary = GameManager.run.duplicate(true)
 	var state_before := GameManager.rng.state
 	SaveManager.save_run()
@@ -200,4 +200,6 @@ func _priority(cm: CombatManager, c: Dictionary) -> float:
 		"skill": score = 6.0 if incoming > cm.player.block else 2.0
 	if int(d["cost"]) == 0:
 		score += 3.0
+	if cm.mechanic == "flow" and d["type"] != cm.last_type:
+		score += 4.0
 	return score

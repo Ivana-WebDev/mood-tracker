@@ -5,6 +5,12 @@ extends Control
 signal tapped(view: CombatantView)
 
 const VIEW_SIZE := Vector2(240, 330)
+const STATUS_ICONS := {
+	"strength": "attack", "dexterity": "shield", "vulnerable": "debuff", "weak": "down", "bleed": "fire",
+	"thorns": "ring", "ritual": "star", "regen": "heart", "flow": "ribbon", "grace": "ribbon", "rhythm": "bell",
+	"spotlight": "star", "amplify": "gear", "factory": "gear", "perpetual": "gear", "lucky": "die",
+	"extra_die": "die", "fate_six": "star",
+}
 
 var c: Combatant
 var cm: CombatManager
@@ -67,38 +73,55 @@ func _draw() -> void:
 	IconDraw.creature(self, shape, bc, s, col, _t, 1.0 if c.is_player else -1.0)
 	# Intent
 	if not c.is_player and c.is_alive() and cm != null and cm.phase != "over":
-		_draw_intent(f, Vector2(size.x / 2.0, 22))
+		_draw_intent(f, Vector2(size.x / 2.0, 26))
 	# Name + HP bar
-	var bar_w := 170.0
-	var bar := Rect2((size.x - bar_w) / 2.0, size.y - 64, bar_w, 18)
-	draw_string(f, Vector2(0, bar.position.y - 8), c.display_name, HORIZONTAL_ALIGNMENT_CENTER, size.x, 15, Palette.TEXT_DIM)
-	draw_style_box(Palette.flat(Palette.HP_BG, 9, Palette.BLOCK if c.block > 0 else Color(0, 0, 0, 0.6), 2), bar)
+	var bar_w := 176.0
+	var bar := Rect2((size.x - bar_w) / 2.0, size.y - 64, bar_w, 20)
+	draw_string_outline(f, Vector2(0, bar.position.y - 8), c.display_name, HORIZONTAL_ALIGNMENT_CENTER, size.x, 15, 4, Color(0, 0, 0, 0.7))
+	draw_string(f, Vector2(0, bar.position.y - 8), c.display_name, HORIZONTAL_ALIGNMENT_CENTER, size.x, 15, Palette.TEXT_DIM.lightened(0.2))
+	draw_style_box(Palette.flat(Color(0, 0, 0, 0.55), 10, IconDraw.OUTLINE, 2), bar.grow(2))
+	draw_style_box(Palette.flat(Palette.HP_BG, 9), bar)
 	var frac := clampf(_shown_hp / float(maxi(1, c.max_hp)), 0.0, 1.0)
-	if frac > 0.0:
-		var fill := Rect2(bar.position + Vector2(2, 2), Vector2((bar.size.x - 4) * frac, bar.size.y - 4))
-		draw_style_box(Palette.flat(Palette.HP if c.block == 0 else Palette.BLOCK.darkened(0.15), 7), fill)
-	var bleed := c.get_status("bleed")
-	if bleed > 0 and c.hp > 0:
-		var bw := (bar.size.x - 4) * clampf(float(mini(bleed, c.hp)) / float(c.max_hp), 0.0, 1.0)
-		draw_rect(Rect2(bar.position.x + 2 + (bar.size.x - 4) * frac - bw, bar.position.y + 2, bw, bar.size.y - 4), Color(Palette.DEBUFF, 0.7))
-	draw_string(f, Vector2(bar.position.x, bar.position.y + 15), "%d/%d" % [maxi(0, c.hp), c.max_hp], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 14, Palette.TEXT)
+	var real := clampf(float(c.hp) / float(maxi(1, c.max_hp)), 0.0, 1.0)
+	var inner := Rect2(bar.position + Vector2(2, 2), Vector2(bar.size.x - 4, bar.size.y - 4))
+	if frac > real:
+		draw_rect(Rect2(inner.position, Vector2(inner.size.x * frac, inner.size.y)), Color("ffd9a0", 0.8))
+	if real > 0.0:
+		var fill_r := Rect2(inner.position, Vector2(maxf(4.0, inner.size.x * real), inner.size.y))
+		var top_c := (Palette.HP if c.block == 0 else Palette.BLOCK).lightened(0.15)
+		var bot_c := (Palette.HP if c.block == 0 else Palette.BLOCK).darkened(0.3)
+		draw_polygon(PackedVector2Array([fill_r.position, Vector2(fill_r.end.x, fill_r.position.y), fill_r.end, Vector2(fill_r.position.x, fill_r.end.y)]),
+			PackedColorArray([top_c, top_c, bot_c, bot_c]))
+		draw_line(fill_r.position + Vector2(2, 3), Vector2(fill_r.end.x - 2, fill_r.position.y + 3), Color(1, 1, 1, 0.3), 2.0)
+	var burn := c.get_status("bleed")
+	if burn > 0 and c.hp > 0:
+		var bw := inner.size.x * clampf(float(mini(burn, c.hp)) / float(c.max_hp), 0.0, 1.0)
+		draw_rect(Rect2(inner.position.x + inner.size.x * real - bw, inner.position.y, bw, inner.size.y), Color("ff8a4f", 0.75))
+	for k in range(10, c.max_hp, 10):
+		var tx := inner.position.x + inner.size.x * float(k) / c.max_hp
+		draw_line(Vector2(tx, inner.position.y + inner.size.y * 0.55), Vector2(tx, inner.end.y), Color(0, 0, 0, 0.35), 1.0)
+	draw_string_outline(f, Vector2(bar.position.x, bar.position.y + 16), "%d/%d" % [maxi(0, c.hp), c.max_hp], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 14, 3, Color(0, 0, 0, 0.7))
+	draw_string(f, Vector2(bar.position.x, bar.position.y + 16), "%d/%d" % [maxi(0, c.hp), c.max_hp], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 14, Palette.TEXT)
 	if c.block > 0:
-		var bpos := bar.position + Vector2(-10, 9)
-		IconDraw.icon(self, "shield", bpos, 17, Palette.BLOCK)
+		var bpos := bar.position + Vector2(-12, 10)
+		IconDraw.icon(self, "shield", bpos + Vector2(1, 2), 19, IconDraw.OUTLINE)
+		IconDraw.icon(self, "shield", bpos, 18, Palette.BLOCK)
+		draw_string_outline(f, bpos + Vector2(-20, 6), str(c.block), HORIZONTAL_ALIGNMENT_CENTER, 40, 15, 3, Color(0, 0, 0, 0.8))
 		draw_string(f, bpos + Vector2(-20, 6), str(c.block), HORIZONTAL_ALIGNMENT_CENTER, 40, 15, Palette.TEXT)
 	# Status chips
 	var keys := c.statuses.keys()
-	var chip_w := 42.0
+	var chip_w := 44.0
 	var x0 := (size.x - keys.size() * chip_w) / 2.0
 	for i in keys.size():
 		var k: String = keys[i]
 		var info: Dictionary = CardDatabase.STATUS_INFO.get(k, {"buff": true, "name": k})
 		var cc := Palette.BUFF if info["buff"] else Palette.DEBUFF
-		var r := Rect2(x0 + i * chip_w + 2, size.y - 38, chip_w - 4, 24)
-		draw_style_box(Palette.flat(cc.darkened(0.7), 8, cc, 1), r)
-		var abbr := (info["name"] as String).substr(0, 3).to_upper()
-		draw_string(f, r.position + Vector2(0, 11), abbr, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 10, cc)
-		draw_string(f, r.position + Vector2(0, 22), str(c.statuses[k]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 12, Palette.TEXT)
+		if k == "bleed":
+			cc = Color("ff8a4f")
+		var r := Rect2(x0 + i * chip_w + 2, size.y - 38, chip_w - 4, 26)
+		draw_style_box(Palette.flat(cc.darkened(0.72), 9, cc, 1), r)
+		IconDraw.icon(self, STATUS_ICONS.get(k, "orb"), r.position + Vector2(11, 13), 8, cc)
+		draw_string(f, r.position + Vector2(18, 18), str(c.statuses[k]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20, 13, Palette.TEXT)
 
 
 func _draw_intent(f: Font, at: Vector2) -> void:
@@ -106,6 +129,10 @@ func _draw_intent(f: Font, at: Vector2) -> void:
 	var kinds: Array = info["kinds"]
 	var x := at.x - (kinds.size() - 1) * 22.0
 	var bob := sin(_t * 3.0) * 3.0
+	var pill_w := kinds.size() * 44.0 + 12.0
+	var has_attack := "attack" in kinds
+	var pill := Rect2(at.x - pill_w / 2.0, at.y - 22 + bob, pill_w, 64 if has_attack else 44)
+	draw_style_box(Palette.flat(Color(Palette.BG_2, 0.85), 14, Color(Palette.ATTACK if has_attack else Palette.LINE, 0.7), 2), pill)
 	for k in kinds:
 		var p := Vector2(x, at.y + bob)
 		match k:
@@ -114,7 +141,8 @@ func _draw_intent(f: Font, at: Vector2) -> void:
 				var txt := str(info["damage"])
 				if int(info["times"]) > 1:
 					txt += "x%d" % int(info["times"])
-				draw_string(f, p + Vector2(-40, 32), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 18, Palette.TEXT)
+				draw_string_outline(f, p + Vector2(-40, 34), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 18, 4, Color(0, 0, 0, 0.8))
+				draw_string(f, p + Vector2(-40, 34), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 18, Palette.TEXT)
 			"defend":
 				IconDraw.icon(self, "shield", p, 14, Palette.BLOCK)
 			"buff":

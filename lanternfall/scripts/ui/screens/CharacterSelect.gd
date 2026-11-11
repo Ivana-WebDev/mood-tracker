@@ -1,7 +1,7 @@
 extends Screen
 ## Choose one of three heroes.
 
-var _selected := "warden"
+var _selected := "clockwright"
 var _panels := {}
 var _t := 0.0
 var _embark: Button
@@ -42,7 +42,7 @@ func _draw() -> void:
 func _hero_panel(id: String) -> PanelContainer:
 	var ch: Dictionary = CharacterDatabase.get_character(id)
 	var p := UI.panel()
-	p.custom_minimum_size = Vector2(340, 470)
+	p.custom_minimum_size = Vector2(340, 500)
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	p.gui_input.connect(func(ev):
 		if ev is InputEventMouseButton and not ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -55,6 +55,7 @@ func _hero_panel(id: String) -> PanelContainer:
 	p.set_meta("portrait", portrait)
 	v.add_child(UI.label(ch["name"], 28, Color(ch["color"]), HORIZONTAL_ALIGNMENT_CENTER))
 	v.add_child(UI.label(ch["title"], 15, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
+	v.add_child(UI.label("Mechanic: %s" % ch["mechanic_name"], 16, Color(ch["color"]).lightened(0.3), HORIZONTAL_ALIGNMENT_CENTER))
 	var d := UI.wrap_label(ch["desc"], 16, Palette.TEXT)
 	d.custom_minimum_size = Vector2(290, 0)
 	v.add_child(d)
@@ -108,6 +109,7 @@ class Portrait extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
-		var c := Vector2(size.x / 2.0, 92)
-		draw_circle(c, 78, Color(color, 0.12))
-		IconDraw.creature(self, shape, c, 60, color, owner_screen._t, 1.0)
+		var c := Vector2(size.x / 2.0, 88)
+		IconDraw.glow(self, c, 84, color, 6)
+		IconDraw.oval(self, c + Vector2(0, 62), 70, 13, color.darkened(0.6), 2.0)
+		IconDraw.creature(self, shape, c, 58, color, owner_screen._t, 1.0)

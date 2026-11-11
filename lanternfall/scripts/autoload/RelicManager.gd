@@ -57,8 +57,10 @@ func on_combat_start(cm: CombatManager) -> void:
 	cm.counters = {"cards": 0}
 	for id in relics():
 		match id:
-			"iron_oath":
-				cm.gain_block(cm.player, 10); _trigger(id)
+			"mainspring":
+				cm.deploy_gadget("turret", 3, 3); _trigger(id)
+			"silver_bell":
+				cm.apply_status(cm.player, "flow", 2); _trigger(id)
 			"oak_buckler":
 				cm.gain_block(cm.player, 7); _trigger(id)
 			"whetstone":
@@ -67,8 +69,6 @@ func on_combat_start(cm: CombatManager) -> void:
 				cm.apply_status(cm.player, "strength", 2); _trigger(id)
 			"thorn_ring":
 				cm.apply_status(cm.player, "thorns", 3); _trigger(id)
-			"ember_core":
-				cm.apply_status(cm.player, "charge", 3); _trigger(id)
 			"serpent_fang":
 				for e in cm.alive_enemies():
 					cm.apply_status(e, "weak", 1)
@@ -79,9 +79,6 @@ func on_combat_start(cm: CombatManager) -> void:
 func on_turn_start(cm: CombatManager) -> void:
 	for id in relics():
 		match id:
-			"smoke_charm":
-				if cm.turn == 1:
-					cm.draw_cards(2); _trigger(id)
 			"bronze_spurs":
 				if cm.turn == 1:
 					cm.energy += 1; _trigger(id)
