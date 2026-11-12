@@ -70,7 +70,7 @@ const CARDS := {
 	"f_veil": {"name": "Veil", "cost": 1, "type": "skill", "rarity": "starter", "owner": "fatebinder", "target": "none",
 		"effects": [{"type": "block", "value": 5, "up": 8}]},
 	"f_fortune_blade": {"name": "Fortune Blade", "cost": 1, "type": "attack", "rarity": "starter", "owner": "fatebinder", "target": "enemy",
-		"effects": [{"type": "die_damage", "pick": "high", "mult": 2, "bonus": 0, "up": {"bonus": 4}}]},
+		"effects": [{"type": "die_damage", "pick": "high", "mult": 2, "bonus": 2, "up": {"bonus": 5}}]},
 	"f_second_roll": {"name": "Second Roll", "cost": 0, "type": "skill", "rarity": "starter", "owner": "fatebinder", "target": "none",
 		"effects": [{"type": "reroll"}, {"type": "draw", "value": 1, "up": 2}]},
 	"f_lucky_strike": {"name": "Lucky Strike", "cost": 1, "type": "attack", "rarity": "common", "owner": "fatebinder", "target": "enemy",

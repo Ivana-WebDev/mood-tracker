@@ -13,7 +13,7 @@ const CHARACTERS := {
 		"name": "The Fatebinder", "title": "Reader of the Lantern's Dice",
 		"desc": "Rolls three Fate Dice every turn. Cards spend, reroll and reshape them. Stack the odds, then cash it all in.",
 		"mechanic": "dice", "mechanic_name": "Fate Dice",
-		"hp": 68, "gold": 99, "color": "b18cff", "shape": "fatebinder", "relic": "weighted_die",
+		"hp": 72, "gold": 99, "color": "b18cff", "shape": "fatebinder", "relic": "weighted_die",
 		"deck": ["f_card_edge", "f_card_edge", "f_card_edge", "f_card_edge", "f_veil", "f_veil", "f_veil", "f_veil", "f_fortune_blade", "f_second_roll"],
 	},
 	"duskdancer": {
