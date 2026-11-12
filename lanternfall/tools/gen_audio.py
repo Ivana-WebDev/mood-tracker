@@ -203,6 +203,14 @@ def sfx():
     for m in [67, 71, 74, 79, 83]:
         mix_at(buf, bell(midi(m), 1.6, 2.2) * 0.35, 0.5)
     save("victory", reverb(buf, 1.4, 0.3), 0.7)
+    # heartbeat: "lub-dub" of two low, muffled thumps
+    buf = np.zeros(int(0.55 * SR))
+    for start, f0, amp in ((0.0, 70, 1.0), (0.2, 58, 0.75)):
+        d = 0.22
+        th = osc(np.geomspace(f0 * 1.6, f0, int(d * SR)), d) * env(int(d * SR), 0.004, 0.18)
+        th += lp_fft(rng.standard_normal(int(d * SR)), 220) * env(int(d * SR), 0.002, 0.08) * 0.5
+        mix_at(buf, th * amp, start)
+    save("heartbeat", lp_fft(buf, 400), 0.9)
     # defeat: descending minor, slow
     buf = np.zeros(int(2.8 * SR))
     for i, m in enumerate([69, 65, 62, 57]):
@@ -215,7 +223,8 @@ def sfx():
 # ---------------------------------------------------------------- MUSIC (dream pop, stereo)
 
 CHORD = {"maj7": [0, 4, 7, 11], "m7": [0, 3, 7, 10], "6": [0, 4, 7, 9], "add9": [0, 4, 7, 14],
-         "m9": [0, 3, 7, 10, 14], "mmaj7": [0, 3, 7, 11], "sus4": [0, 5, 7, 10], "maj9": [0, 4, 7, 11, 14]}
+         "m9": [0, 3, 7, 10, 14], "mmaj7": [0, 3, 7, 11], "sus4": [0, 5, 7, 10], "maj9": [0, 4, 7, 11, 14],
+         "madd9": [0, 3, 7, 14]}
 
 
 def save_stereo(name, L, R, peak=0.8):
@@ -235,7 +244,8 @@ def mod_delay(x, base_ms, depth_ms, rate_hz, phase=0.0):
     """Chorus voice: x read through a slowly modulated delay line (linear interpolation)."""
     n = np.arange(len(x))
     d = (base_ms + depth_ms * np.sin(2 * np.pi * rate_hz * n / SR + phase)) * SR / 1000.0
-    return np.interp(n - d, n, x, left=0.0)
+    # circular read: the start of a loop continues from its end
+    return np.interp(n - d, n, x, period=len(x))
 
 
 def chorus(x, depth=1.0):
@@ -257,8 +267,7 @@ def pingpong(L, R, delay_s, fb=0.45, mix=0.4, taps=7):
         shift = d * k
         if shift >= n:
             break
-        echo = np.zeros(n)
-        echo[shift:] = src[: n - shift]
+        echo = np.roll(src, shift)  # circular, so echoes from the end land on the loop start
         echo = lp_fft(echo, 5200 / (1 + k * 0.35))
         if k % 2:
             oR += echo * g * mix * 2
@@ -340,7 +349,8 @@ def shaker(d=0.07):
 
 
 def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, arp_rate=8,
-                pad_cut=1600, verb_mix=0.45, peak=0.78, bass="long", tremolo=0.0, dark=False):
+                pad_cut=1600, verb_mix=0.45, peak=0.78, bass="long", tremolo=0.0, dark=False,
+                pedal=None, ostinato=None, gtr_oct=12, bright=0.4, warble=4.0, master_lp=3400, pump=0.35):
     beat = 60.0 / bpm
     bar = beat * 4
     n = int(bars * bar * SR)
@@ -360,16 +370,22 @@ def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, a
         vp = vocal_pad([m + 12 for m in tones[:3]], bar * 1.1, vowel)
         wrap_add(padL, mod_delay(vp, 8, 2, 0.15) * 0.5, st)
         wrap_add(padR, vp * 0.5, st)
-        # shimmering arpeggio guitar
-        order = [0, 2, 1, 3, 2, 4 if len(tones) > 4 else 1, 3, 2]
+        # hypnotic ostinato: the same contour every bar, re-voiced onto each chord
+        order = ostinato or [0, 2, 1, 3, 2, 4 if len(tones) > 4 else 1, 3, 2]
         step = bar / arp_rate
         for k in range(arp_rate):
-            m = tones[order[k % len(order)] % len(tones)] + 24
-            g = pluck(midi(m), min(1.6, step * 4), 0.55) * env(int(min(1.6, step * 4) * SR), 0.004, 1.2, 0.0, 0.3)
+            idx = order[k % len(order)]
+            m = tones[idx % len(tones)] + gtr_oct + (12 if idx >= len(tones) else 0)
+            g = pluck(midi(m), min(1.6, step * 4), bright) * env(int(min(1.6, step * 4) * SR), 0.004, 1.2, 0.0, 0.3)
             if tremolo:
                 tt = t(min(1.6, step * 4))
                 g *= 1 - tremolo * (0.5 + 0.5 * np.sin(2 * np.pi * (bpm / 60 * 2) * tt))
             wrap_add(gtr, g * (0.55 if k % 2 == 0 else 0.4), st + k * step)
+        # droning pedal (root + fifth) that never changes: the hypnotic floor of the track
+        if pedal is not None:
+            d = bar
+            dr = osc(midi(pedal), d, "sine") * 0.6 + osc(midi(pedal + 7), d, "sine") * 0.25 + osc(midi(pedal + 12), d, "tri") * 0.12
+            wrap_add(low, lp_fft(dr, 300) * 0.35, st)
         # bass
         if bass == "long":
             d = bar
@@ -408,6 +424,13 @@ def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, a
                         wrap_add(drm, dream_snare(0.45) * 0.55, pos)
                     if k % 2 == 0:
                         wrap_add(drm, shaker() * 0.12, pos)
+    # pads "breathe" with the beat (gentle sidechain-style pump)
+    if pump > 0:
+        tt = np.arange(n) / SR
+        ph = (tt % beat) / beat
+        gain = 1 - pump * np.exp(-ph * 6.0)
+        padL *= gain
+        padR *= gain
     # effects
     gL, gR = chorus(gtr, 1.2)
     gL, gR = pingpong(gL, gR, beat * 0.75, 0.5, 0.45)
@@ -416,9 +439,12 @@ def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, a
     L = gL * 0.8 + padL + lL + drm * 0.9 + low
     R = gR * 0.8 + padR + lR + drm * 0.9 + low
     L, R = stereo_reverb(L, R, 3.6 if not dark else 3.0, verb_mix)
-    # keep the low end tight and centred after the wash
-    L = hp_fft(L, 35)
-    R = hp_fft(R, 35)
+    # keep the low end tight and centred after the wash, darken the top, add a slow tape warble
+    L = lp_fft(hp_fft(L, 35), master_lp)
+    R = lp_fft(hp_fft(R, 35), master_lp)
+    if warble > 0:
+        L = mod_delay(L, 12, warble, 0.37)
+        R = mod_delay(R, 12, warble, 0.37, 0.4)
     xf = int(0.04 * SR)  # tiny crossfade at the seam
     ramp = np.linspace(0, 1, xf)
     for ch in (L, R):
@@ -427,22 +453,28 @@ def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, a
 
 
 def music():
-    # Title: floating, half-asleep (D major): Dmaj7 - Bm7 - Gmaj9 - A6
-    dream_track("music_menu", 72, [(50, "maj7"), (47, "m7"), (43, "maj9"), (45, "6")], 8,
-                drums="none", vowel="ah", arp_rate=8, pad_cut=1400, verb_mix=0.5,
-                lead=[(0, 7, 1.5), (1.5, 4, 0.5), (2, 2, 2)])
-    # Map / events: hazy wandering (F major): Fmaj7 - Am7 - Cmaj7 - Gadd9
-    dream_track("music_map", 84, [(41, "maj7"), (45, "m7"), (48, "maj7"), (43, "add9")], 16,
-                drums="soft", vowel="oo", arp_rate=8, pad_cut=1700, verb_mix=0.45,
-                lead=[(0, 4, 1), (1, 7, 1), (2, 11, 1.5), (3.5, 9, 0.5)])
-    # Combat: driving shoegaze-tinged dream pop (E minor): Em9 - Cmaj7 - Gmaj7 - D6
-    dream_track("music_combat", 104, [(40, "m9"), (36, "maj7"), (43, "maj7"), (38, "6")], 16,
-                drums="drive", vowel="ah", arp_rate=16, pad_cut=1900, verb_mix=0.36, bass="pulse", tremolo=0.25,
-                lead=[(0, 7, 0.5), (0.5, 10, 0.5), (1, 12, 1), (2.5, 14, 0.5), (3, 12, 1)], peak=0.8)
-    # Boss: dark and swirling (C minor): Cm(maj7) - Abmaj7 - Fm9 - Gsus4
-    dream_track("music_boss", 96, [(36, "mmaj7"), (32, "maj7"), (41, "m9"), (43, "sus4")], 16,
-                drums="dark", vowel="oo", arp_rate=16, pad_cut=1200, verb_mix=0.4, bass="pulse", dark=True,
-                lead=[(0, 12, 1), (1, 11, 0.5), (1.5, 8, 1.5), (3, 7, 1)], peak=0.82)
+    hyp = [0, 2, 4, 2, 1, 2, 4, 2, 0, 2, 4, 2, 1, 3, 4, 3]  # repeating 16-step contour
+    # Title: slow, nocturnal, entrancing (A minor) over an A pedal
+    dream_track("music_menu", 64, [(45, "madd9"), (41, "maj7"), (45, "madd9"), (40, "m7")], 8,
+                drums="none", vowel="oo", arp_rate=16, ostinato=hyp, pedal=33, pad_cut=1100, verb_mix=0.55,
+                gtr_oct=12, bright=0.35, master_lp=3000, warble=5.0, pump=0.2,
+                lead=[(0, 7, 2), (2, 3, 1), (3, 2, 1)])
+    # Map / events: drifting and hypnotic (D minor) over a D pedal
+    dream_track("music_map", 74, [(38, "m9"), (34, "maj7"), (38, "m9"), (45, "m7")], 16,
+                drums="soft", vowel="oo", arp_rate=16, ostinato=hyp, pedal=26, pad_cut=1300, verb_mix=0.5,
+                gtr_oct=12, bright=0.38, master_lp=3300, warble=4.5, pump=0.3,
+                lead=[(0, 3, 1), (1, 7, 1.5), (2.5, 10, 0.5), (3, 7, 1)])
+    # Combat: dark, driving, trance-like (E minor) over an E pedal pulse
+    dream_track("music_combat", 96, [(40, "m9"), (36, "maj7"), (40, "m9"), (47, "m7")], 16,
+                drums="drive", vowel="ah", arp_rate=16, ostinato=hyp, pedal=28, pad_cut=1500, verb_mix=0.4,
+                bass="pulse", tremolo=0.3, gtr_oct=12, bright=0.42, master_lp=3600, warble=3.0, pump=0.45,
+                lead=[(0, 7, 0.5), (0.5, 10, 0.5), (1, 12, 1.5), (3, 10, 1)], peak=0.8)
+    # Boss: ominous and spiralling, Phrygian flat-II (C minor) over a low C drone
+    dream_track("music_boss", 86, [(36, "m9"), (37, "maj7"), (36, "m9"), (32, "maj7")], 16,
+                drums="dark", vowel="oo", arp_rate=16, ostinato=[0, 3, 1, 3, 2, 3, 1, 3, 0, 3, 1, 3, 2, 4, 3, 1],
+                pedal=24, pad_cut=1000, verb_mix=0.45, bass="pulse", dark=True, gtr_oct=12, bright=0.36,
+                master_lp=2800, warble=4.0, pump=0.4,
+                lead=[(0, 12, 1), (1, 13, 0.5), (1.5, 8, 1.5), (3, 7, 1)], peak=0.82)
 
 
 if __name__ == "__main__":

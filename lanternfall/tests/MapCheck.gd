@@ -7,15 +7,29 @@ func _ready() -> void:
 	var worst_mid := 99
 	var maps := 400
 	var total_rest := 0
+	var adjacent := 0
+	var no_shop := 0
+	var early := 0
 	var total_nodes := 0
 	for i in maps:
 		rng.seed = 1000 + i
 		var m: Dictionary = MapManager.generate(1 + i % 2, rng)
 		var r := _min_rests(m["nodes"])
+		if m["nodes"].filter(func(n): return n["type"] == "shop").is_empty():
+			no_shop += 1
+		for n in m["nodes"]:
+			if n["type"] == "rest":
+				if n["floor"] <= 2:
+					early += 1
+				for nx in n["next"]:
+					if m["nodes"][nx]["type"] == "rest":
+						adjacent += 1
 		total_rest += m["nodes"].filter(func(n): return n["type"] == "rest" and n["floor"] < 11).size()
 		total_nodes += m["nodes"].size()
 		hist[r] = hist.get(r, 0) + 1
 	print("routes' minimum rest sites (incl. the pre-boss campfire) over %d maps: %s" % [maps, str(hist)])
+	print("rest next to rest: %d   rest in first 3 floors: %d   maps without a shop: %d" % [adjacent, early, no_shop])
+	print("MAPCHECK ", "OK" if adjacent == 0 and early == 0 and no_shop == 0 and not hist.has(1) and not hist.has(0) else "FAILED")
 	print("avg mid-act rest sites per map: %.1f of %.1f nodes" % [float(total_rest) / maps, float(total_nodes) / maps])
 	get_tree().quit()
 

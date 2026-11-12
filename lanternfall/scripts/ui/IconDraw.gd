@@ -189,7 +189,30 @@ static func _bounds(poly: PackedVector2Array) -> Rect2:
 
 
 ## Fills a polygon with cel shading (shadow on the right, rim light on the left) and an outline.
+## Animated outlines (flapping wings, swaying skirts) can momentarily cross themselves;
+## the renderer can't fill those, so fall back to the convex hull for that frame.
+static func safe(poly: PackedVector2Array) -> PackedVector2Array:
+	if poly.size() >= 3 and Geometry2D.triangulate_polygon(poly).is_empty():
+		var hull := Geometry2D.convex_hull(poly)
+		if hull.size() > 1 and hull[0] == hull[hull.size() - 1]:
+			hull.remove_at(hull.size() - 1)
+		return hull
+	return poly
+
+
+## Shoelace area; clipping can leave sub-pixel slivers that the renderer can't triangulate.
+static func _area(p: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in p.size():
+		var j := (i + 1) % p.size()
+		a += p[i].x * p[j].y - p[j].x * p[i].y
+	return absf(a) * 0.5
+
+
 static func fill(ci: CanvasItem, poly: PackedVector2Array, col: Color, ow: float = 2.0, shade: bool = true) -> void:
+	if poly.size() < 3:
+		return
+	poly = safe(poly)
 	if poly.size() < 3:
 		return
 	ci.draw_colored_polygon(poly, col)
@@ -199,12 +222,14 @@ static func fill(ci: CanvasItem, poly: PackedVector2Array, col: Color, ow: float
 			Vector2(r.position.x + r.size.x * 0.62, r.position.y - 4), Vector2(r.end.x + 4, r.position.y - 4),
 			Vector2(r.end.x + 4, r.end.y + 4), Vector2(r.position.x + r.size.x * 0.42, r.end.y + 4)])
 		for q in Geometry2D.intersect_polygons(poly, cut):
-			ci.draw_colored_polygon(q, col.darkened(0.24))
+			if _area(q) > 1.0:
+				ci.draw_colored_polygon(q, col.darkened(0.24))
 		var hl := PackedVector2Array([
 			Vector2(r.position.x - 4, r.position.y - 4), Vector2(r.position.x + r.size.x * 0.2, r.position.y - 4),
 			Vector2(r.position.x + r.size.x * 0.1, r.end.y + 4), Vector2(r.position.x - 4, r.end.y + 4)])
 		for q in Geometry2D.intersect_polygons(poly, hl):
-			ci.draw_colored_polygon(q, col.lightened(0.16))
+			if _area(q) > 1.0:
+				ci.draw_colored_polygon(q, col.lightened(0.16))
 	if ow > 0.0:
 		var closed := poly.duplicate()
 		closed.append(poly[0])
@@ -282,7 +307,10 @@ static func ribbon(ci: CanvasItem, from: Vector2, dir: Vector2, length: float, w
 		right.append(p - normal * w * 0.5)
 	right.reverse()
 	var poly := left + right
-	ci.draw_colored_polygon(poly, col)
+	if Geometry2D.triangulate_polygon(poly).is_empty():
+		ci.draw_polyline(left, col, maxf(1.5, width * 0.6), true)
+	else:
+		ci.draw_colored_polygon(poly, col)
 	ci.draw_polyline(left, col.lightened(0.35), maxf(1.0, width * 0.18), true)
 
 
@@ -463,11 +491,13 @@ static func _blob(ci: CanvasItem, c: Vector2, s: float, col: Color, t: float, fa
 	for i in 7:
 		var u := float(i) / 6.0
 		pts.append(c + Vector2(0.9 / squash - u * 1.8 / squash, 0.95 + (0.06 if i % 2 == 1 else 0.0)) * s)
+	pts = safe(pts)
 	ci.draw_colored_polygon(pts, Color(col, 0.92))
 	fill(ci, pts, Color(col, 0.0), maxf(1.5, s * 0.04), false)
 	var r := _bounds(pts)
 	for q in Geometry2D.intersect_polygons(pts, PackedVector2Array([Vector2(r.position.x + r.size.x * 0.6, r.position.y), r.end - Vector2(0, r.size.y), r.end, Vector2(r.position.x + r.size.x * 0.45, r.end.y)])):
-		ci.draw_colored_polygon(q, Color(col.darkened(0.3), 0.6))
+		if _area(q) > 1.0:
+			ci.draw_colored_polygon(q, Color(col.darkened(0.3), 0.6))
 	# bubbles + shine
 	for i in 4:
 		var bp := c + Vector2(-0.4 + i * 0.25, 0.5 - fmod(t * 0.3 + i * 0.27, 1.0) * 0.9) * s

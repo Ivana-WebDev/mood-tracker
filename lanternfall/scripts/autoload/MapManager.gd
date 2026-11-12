@@ -114,34 +114,53 @@ func _assign_types(nodes: Array, rng: RandomNumberGenerator) -> void:
 				break
 			chosen = "monster"
 		n["type"] = chosen
+	_guarantee_mid_rest(nodes, rng)
 	# Make sure there is at least one shop and one elite per act.
 	_guarantee(nodes, "shop", 3, 9, rng)
 	_guarantee(nodes, "elite", 5, 10, rng)
-	_guarantee_mid_rest(nodes, rng)
 
 
 ## Every route must pass a rest site between floors 4 and 9, on top of the campfire before the boss.
+## Rest sites are never placed next to another rest site, nor in a route's first 3 nodes.
 func _guarantee_mid_rest(nodes: Array, rng: RandomNumberGenerator) -> void:
-	for attempt in 40:
+	for attempt in 60:
 		var path := _route_without_mid_rest(nodes)
 		if path.is_empty():
 			return
-		var cands: Array = path.filter(func(n): return n["floor"] >= 4 and n["floor"] <= 9 and n["type"] in ["monster", "event"])
-		# Prefer spots whose neighbours aren't rest sites, so campfires stay spread out.
-		var spaced: Array = cands.filter(func(n):
-			for nx in n["next"]:
-				if nodes[nx]["type"] == "rest":
-					return false
-			for pr in parents_of(nodes, n["id"]):
-				if pr["type"] == "rest":
-					return false
-			return true)
-		var pick_from: Array = spaced if not spaced.is_empty() else cands
-		if pick_from.is_empty():
-			pick_from = path.filter(func(n): return n["floor"] >= 4 and n["floor"] <= 9 and n["type"] != "treasure")
-		if pick_from.is_empty():
-			return
-		pick_from[rng.randi_range(0, pick_from.size() - 1)]["type"] = "rest"
+		var spot := _spaced_spot(nodes, path, ["monster", "event"], rng)
+		if spot.is_empty():
+			spot = _spaced_spot(nodes, path, ["monster", "event", "shop", "elite"], rng)
+		if spot.is_empty():
+			# Every floor-4..9 spot on this route touches a rest site: move that neighbouring rest
+			# onto this route instead (it stays a rest site for its other routes only if spaced).
+			var cand: Array = path.filter(func(n): return n["floor"] >= 4 and n["floor"] <= 9 and n["type"] in ["monster", "event"])
+			if cand.is_empty():
+				return
+			var pick: Dictionary = cand[rng.randi_range(0, cand.size() - 1)]
+			for nb in _neighbours(nodes, pick):
+				if nb["type"] == "rest" and nb["floor"] < MapManager.FLOORS - 1:
+					nb["type"] = "monster"
+			pick["type"] = "rest"
+			continue
+		spot["type"] = "rest"
+
+
+func _neighbours(nodes: Array, n: Dictionary) -> Array:
+	var out: Array = parents_of(nodes, n["id"])
+	for nx in n["next"]:
+		out.append(nodes[nx])
+	return out
+
+
+func _spaced_spot(nodes: Array, path: Array, types: Array, rng: RandomNumberGenerator) -> Dictionary:
+	var c: Array = path.filter(func(n):
+		if n["floor"] < 4 or n["floor"] > 9 or not types.has(n["type"]):
+			return false
+		for nb in _neighbours(nodes, n):
+			if nb["type"] == "rest":
+				return false
+		return true)
+	return {} if c.is_empty() else c[rng.randi_range(0, c.size() - 1)]
 
 
 func _route_without_mid_rest(nodes: Array) -> Array:

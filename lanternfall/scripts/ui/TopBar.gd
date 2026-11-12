@@ -91,6 +91,19 @@ func refresh() -> void:
 		_relics.add_child(RelicIcon.new(id, 42))
 
 
+func _process(_d: float) -> void:
+	if _hp == null:
+		return
+	var parts := _hp.text.split("/")
+	if parts.size() == 2 and int(parts[1]) > 0 and float(int(parts[0])) / float(int(parts[1])) < LowHPOverlay.THRESHOLD:
+		var p := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * 8.0)
+		_hp.modulate = Color(1, 1, 1).lerp(Color(1.6, 0.6, 0.6), p)
+		_hp.scale = Vector2.ONE * (1.0 + 0.08 * p)
+	else:
+		_hp.modulate = Color.WHITE
+		_hp.scale = Vector2.ONE
+
+
 func _show_map() -> void:
 	Overlay.open(self, MapOverlay.new())
 

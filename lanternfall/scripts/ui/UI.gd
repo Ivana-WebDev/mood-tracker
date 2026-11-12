@@ -35,21 +35,13 @@ static func button(text: String, callback: Callable, min_size: Vector2 = Vector2
 
 static func accent_button(text: String, callback: Callable, color: Color = Palette.GOLD, min_size: Vector2 = Vector2(220, 64)) -> Button:
 	var b := button(text, callback, min_size)
-	b.add_theme_stylebox_override("normal", Palette.flat(color.darkened(0.55), 14, color, 3))
-	b.add_theme_stylebox_override("hover", Palette.flat(color.darkened(0.4), 14, color.lightened(0.2), 3))
-	b.add_theme_stylebox_override("pressed", Palette.flat(color.darkened(0.7), 14, color, 3))
-	b.add_theme_color_override("font_color", color.lightened(0.5))
+	UISkin.style_button(b, color.darkened(0.5), color, color.lightened(0.35), color.lightened(0.6))
 	return b
 
 
-static func panel(bg: Color = Palette.PANEL, radius: int = 18, border: Color = Palette.LINE) -> PanelContainer:
+static func panel(bg: Color = Palette.PANEL, _radius: int = 18, border: Color = Palette.LINE) -> PanelContainer:
 	var p := PanelContainer.new()
-	var sb := Palette.flat(bg, radius, border, 2)
-	sb.content_margin_left = 24
-	sb.content_margin_right = 24
-	sb.content_margin_top = 20
-	sb.content_margin_bottom = 20
-	p.add_theme_stylebox_override("panel", sb)
+	p.add_theme_stylebox_override("panel", UISkin.panel_box(bg, border, 20))
 	return p
 
 

@@ -19,6 +19,7 @@ var current: Control
 var current_name: String = ""
 var screen_layer: Control
 var overlay_layer: Control
+var low_hp: LowHPOverlay
 var _tooltip: PanelContainer
 var _tooltip_timer: SceneTreeTimer
 var _toast_box: VBoxContainer
@@ -36,6 +37,8 @@ func _ready() -> void:
 	screen_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	screen_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(screen_layer)
+	low_hp = LowHPOverlay.new()
+	add_child(low_hp)
 	overlay_layer = Control.new()
 	overlay_layer.name = "Overlays"
 	overlay_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

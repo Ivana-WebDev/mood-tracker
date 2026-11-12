@@ -70,6 +70,12 @@ func _draw() -> void:
 				var p := bc + Vector2(0, s * 0.1) + Vector2(cos(a), sin(a)) * s * 1.25
 				draw_circle(p, 5, Palette.BAD)
 	var col := color.lerp(Color.WHITE, flash)
+	var low := c.is_player and c.hp > 0 and float(c.hp) / float(maxi(1, c.max_hp)) < LowHPOverlay.THRESHOLD
+	if low:
+		var hb := 0.5 + 0.5 * sin(_t * 7.0)
+		for k in 4:
+			draw_circle(bc + Vector2(0, s * 0.2), s * (1.25 + k * 0.18 + hb * 0.1), Color(0.85, 0.05, 0.1, 0.07 + hb * 0.04))
+		col = col.lerp(Color(1.0, 0.3, 0.3), 0.18 + 0.12 * hb)
 	IconDraw.creature(self, shape, bc, s, col, _t, 1.0 if c.is_player else -1.0)
 	# Intent
 	if not c.is_player and c.is_alive() and cm != null and cm.phase != "over":
@@ -81,6 +87,8 @@ func _draw() -> void:
 	draw_string(f, Vector2(0, bar.position.y - 8), c.display_name, HORIZONTAL_ALIGNMENT_CENTER, size.x, 15, Palette.TEXT_DIM.lightened(0.2))
 	draw_style_box(Palette.flat(Color(0, 0, 0, 0.55), 10, IconDraw.OUTLINE, 2), bar.grow(2))
 	draw_style_box(Palette.flat(Palette.HP_BG, 9), bar)
+	if c.is_player and c.hp > 0 and float(c.hp) / float(maxi(1, c.max_hp)) < LowHPOverlay.THRESHOLD:
+		draw_style_box(Palette.flat(Color(0, 0, 0, 0), 12, Color(1.0, 0.2, 0.25, 0.5 + 0.5 * sin(_t * 9.0)), 3), bar.grow(5))
 	var frac := clampf(_shown_hp / float(maxi(1, c.max_hp)), 0.0, 1.0)
 	var real := clampf(float(c.hp) / float(maxi(1, c.max_hp)), 0.0, 1.0)
 	var inner := Rect2(bar.position + Vector2(2, 2), Vector2(bar.size.x - 4, bar.size.y - 4))

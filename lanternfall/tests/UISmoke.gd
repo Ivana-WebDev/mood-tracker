@@ -78,10 +78,11 @@ func _ready() -> void:
 	main.current._buy_card(0)
 	main.current._buy_relic(0)
 	await _frames(4)
-	GameManager.set_pending({"type": "event", "event": "smith"})
-	GameManager.goto("event", {"event": "smith"})
-	await _frames(10)
-	await _shot("12_event")
+	for ev in EventDatabase.EVENTS.keys():
+		GameManager.set_pending({"type": "event", "event": ev})
+		GameManager.goto("event", {"event": ev})
+		await _frames(12)
+		await _shot("12_event_" + ev)
 	GameManager.set_pending({"type": "treasure", "gold": 40, "relic": "battle_drum", "opened": false})
 	GameManager.goto("treasure")
 	await _frames(10)
@@ -104,6 +105,11 @@ func _ready() -> void:
 	GameManager.goto("combat", p)
 	await _wait(1.2)
 	await _shot("16_boss")
+	main.current.cm.player.hp = 9
+	main.current._refresh()
+	await _wait(1.6)
+	await _shot("16b_low_hp")
+	main.current.cm.player.hp = main.current.cm.player.max_hp
 	var p2 := {"type": "combat", "kind": "monster", "enemies": ["ember_imp", "ember_imp", "ember_imp"]}
 	GameManager.set_pending(p2)
 	GameManager.goto("combat", p2)

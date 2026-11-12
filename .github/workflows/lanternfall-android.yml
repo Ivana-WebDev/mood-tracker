@@ -26,6 +26,8 @@ jobs:
         run: godot --headless --editor --quit --path "$PROJECT_DIR" || true
       - name: Simulated runs (AutoPlay bot)
         run: godot --headless --path "$PROJECT_DIR" res://tests/AutoPlay.tscn
+      - name: Map generation rules (rest sites)
+        run: godot --headless --path "$PROJECT_DIR" res://tests/MapCheck.tscn | tee mapcheck.txt && grep -q "MAPCHECK OK" mapcheck.txt
 
   android:
     name: Export Android APK

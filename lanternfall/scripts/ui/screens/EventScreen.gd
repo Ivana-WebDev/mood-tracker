@@ -11,10 +11,10 @@ func _ready() -> void:
 	_event = EventDatabase.EVENTS.get(params.get("event", GameManager.run["pending"].get("event", "")), EventDatabase.EVENTS["shrine"])
 	var p := UI.panel()
 	p.custom_minimum_size = Vector2(760, 0)
-	_box = UI.vbox(14)
+	_box = UI.vbox(10)
 	p.add_child(_box)
 	var c := UI.center(p)
-	c.offset_top = TopBar.HEIGHT + 120
+	c.offset_top = TopBar.HEIGHT + 4
 	add_child(c)
 	move_child(c, 0)
 	_build()
@@ -27,16 +27,15 @@ func _process(d: float) -> void:
 
 func _draw() -> void:
 	draw_backdrop(Palette.NODE_COLORS["event"])
-	var c := Vector2(size.x / 2.0, TopBar.HEIGHT + 80)
-	draw_circle(c, 52 + sin(_t * 2.0) * 3.0, Color(Palette.NODE_COLORS["event"], 0.15))
-	IconDraw.icon(self, "event", c, 36, Palette.NODE_COLORS["event"])
 
 
 func _build() -> void:
 	for ch in _box.get_children():
 		ch.queue_free()
 	var pending: Dictionary = GameManager.run["pending"]
-	_box.add_child(UI.label(_event["title"], 32, Palette.GOLD, HORIZONTAL_ALIGNMENT_CENTER))
+	var ev_id: String = params.get("event", pending.get("event", "shrine"))
+	_box.add_child(EventArt.new(ev_id, Vector2(700, 170)))
+	_box.add_child(UI.label(_event["title"], 30, Palette.GOLD, HORIZONTAL_ALIGNMENT_CENTER))
 	if pending.has("result"):
 		var r := UI.wrap_label(pending["result"], 20, Palette.TEXT)
 		r.custom_minimum_size = Vector2(700, 0)
@@ -55,7 +54,7 @@ func _build() -> void:
 	_box.add_child(t)
 	for i in _event["options"].size():
 		var o: Dictionary = _event["options"][i]
-		var b := UI.button(o["label"], _choose.bind(i), Vector2(700, 58), 19)
+		var b := UI.button(o["label"], _choose.bind(i), Vector2(700, 52), 18)
 		if int(o.get("cost_gold", 0)) > int(GameManager.run["gold"]):
 			b.disabled = true
 		var tip := _option_tip(o)

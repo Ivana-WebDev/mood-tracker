@@ -31,6 +31,9 @@ func _stock() -> Dictionary:
 func _build() -> void:
 	for ch in _root.get_children():
 		ch.queue_free()
+	var banner := EventArt.new("shop", Vector2(0, 160))
+	banner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_root.add_child(banner)
 	var head := UI.hbox(30)
 	head.mouse_filter = Control.MOUSE_FILTER_PASS
 	head.add_child(UI.label("The Lantern Merchant", 32, Palette.GOLD))
