@@ -212,121 +212,237 @@ def sfx():
     save("defeat", reverb(buf, 1.8, 0.35), 0.7)
 
 
-# ---------------------------------------------------------------- MUSIC
+# ---------------------------------------------------------------- MUSIC (dream pop, stereo)
 
-def pad_chord(notes, d, shape="saw", cutoff=1400):
-    x = sum(osc(midi(m), d, shape) * 0.5 + osc(midi(m) * 1.004, d, shape) * 0.5 for m in notes) / len(notes)
-    return lp_fft(x, cutoff) * env(int(d * SR), 0.6, 0.4, 0.75, 0.8)
-
-
-def kick(d=0.35):
-    return osc(np.geomspace(150, 42, int(d * SR)), d) * env(int(d * SR), 0.001, 0.3)
+CHORD = {"maj7": [0, 4, 7, 11], "m7": [0, 3, 7, 10], "6": [0, 4, 7, 9], "add9": [0, 4, 7, 14],
+         "m9": [0, 3, 7, 10, 14], "mmaj7": [0, 3, 7, 11], "sus4": [0, 5, 7, 10], "maj9": [0, 4, 7, 11, 14]}
 
 
-def hat(d=0.05, bright=7000):
-    return hp_fft(rng.standard_normal(int(d * SR)), bright) * env(int(d * SR), 0.0005, 0.045)
+def save_stereo(name, L, R, peak=0.8):
+    m = max(np.max(np.abs(L)), np.max(np.abs(R))) or 1.0
+    L, R = np.clip(L / m * peak, -1, 1), np.clip(R / m * peak, -1, 1)
+    inter = np.empty(len(L) * 2)
+    inter[0::2], inter[1::2] = L, R
+    with wave.open(os.path.join(OUT, name + ".wav"), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((inter * 32767).astype("<i2").tobytes())
+    print(f"{name}.wav  {len(L) / SR:.2f}s stereo")
 
 
-def snare(d=0.18):
-    n = lp_fft(rng.standard_normal(int(d * SR)), 5000) * env(int(d * SR), 0.001, 0.15)
-    return n * 0.8 + osc(190, d, "tri") * env(int(d * SR), 0.001, 0.08) * 0.5
+def mod_delay(x, base_ms, depth_ms, rate_hz, phase=0.0):
+    """Chorus voice: x read through a slowly modulated delay line (linear interpolation)."""
+    n = np.arange(len(x))
+    d = (base_ms + depth_ms * np.sin(2 * np.pi * rate_hz * n / SR + phase)) * SR / 1000.0
+    return np.interp(n - d, n, x, left=0.0)
 
 
-def track(name, bpm, bars, chords, arp_pattern, arp_oct, bass_style, drums, pad_cutoff, verb, lead=None, peak=0.8):
+def chorus(x, depth=1.0):
+    """Mono in, wide stereo out."""
+    L = x * 0.6 + mod_delay(x, 14, 3.5 * depth, 0.31) * 0.55 + mod_delay(x, 21, 2.5 * depth, 0.19, 1.3) * 0.35
+    R = x * 0.6 + mod_delay(x, 17, 3.5 * depth, 0.27, 2.1) * 0.55 + mod_delay(x, 24, 2.5 * depth, 0.23, 0.4) * 0.35
+    return L, R
+
+
+def pingpong(L, R, delay_s, fb=0.45, mix=0.4, taps=7):
+    """Stereo ping-pong echo; echoes alternate sides and darken as they repeat."""
+    d = int(delay_s * SR)
+    n = len(L)
+    oL, oR = L.copy(), R.copy()
+    src = (L + R) * 0.5
+    g = 1.0
+    for k in range(1, taps + 1):
+        g *= fb
+        shift = d * k
+        if shift >= n:
+            break
+        echo = np.zeros(n)
+        echo[shift:] = src[: n - shift]
+        echo = lp_fft(echo, 5200 / (1 + k * 0.35))
+        if k % 2:
+            oR += echo * g * mix * 2
+        else:
+            oL += echo * g * mix * 2
+    return oL, oR
+
+
+def wrap_add(buf, x, start):
+    """Adds x into a loop buffer, wrapping anything past the end back to the start."""
+    s = int(start * SR) % len(buf)
+    first = min(len(x), len(buf) - s)
+    buf[s:s + first] += x[:first]
+    rest = x[first:]
+    while len(rest):
+        k = min(len(rest), len(buf))
+        buf[:k] += rest[:k]
+        rest = rest[k:]
+
+
+def stereo_reverb(L, R, seconds=3.4, mix=0.45):
+    n = int(seconds * SR)
+    out = []
+    for ch, seed_shift in ((L, 0), (R, 1)):
+        local = np.random.default_rng(11 + seed_shift)
+        ir = local.standard_normal(n) * np.exp(-np.linspace(0, 5.5, n))
+        ir = lp_fft(ir, 2800)
+        ir[: int(0.02 * SR)] *= np.linspace(0, 1, int(0.02 * SR))  # soft pre-delay
+        ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9
+        N = 1 << int(np.ceil(np.log2(len(ch) + n)))
+        wet = np.fft.irfft(np.fft.rfft(ch, N) * np.fft.rfft(ir, N), N)[: len(ch) + n]
+        loop = wet[: len(ch)].copy()
+        loop[: n] += wet[len(ch):]  # wrap the tail for a seamless loop
+        out.append(ch * (1 - mix) + loop * mix * 0.7)
+    return out
+
+
+def bandpass(x, f0, q=6.0):
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / SR)
+    X *= 1 / (1 + (q * (f / f0 - f0 / np.maximum(f, 1))) ** 2)
+    return np.fft.irfft(X, len(x))
+
+
+def vocal_pad(notes, d, vowel="ah"):
+    """Breathy choir-ish 'aah' / 'ooh' pad: detuned saws through vowel formants plus air."""
+    formants = {"ah": [(730, 1.0), (1090, 0.6), (2440, 0.3)], "oo": [(320, 1.0), (870, 0.4), (2240, 0.15)]}[vowel]
+    src = sum(osc(midi(m) * (1 + 0.004 * k), d, "saw") for m in notes for k in (-1, 1)) / (2 * len(notes))
+    voice = sum(bandpass(src, f0, 5.0) * a for f0, a in formants)
+    air = bandpass(rng.standard_normal(int(d * SR)), formants[1][0], 2.0) * 0.08
+    return (voice + air) * env(int(d * SR), 1.2, 0.5, 0.8, 1.2)
+
+
+def lush_pad(notes, d, cutoff=1600):
+    x = sum(osc(midi(m), d, "saw") * 0.4 + osc(midi(m) * 1.006, d, "saw") * 0.3 + osc(midi(m) * 0.994, d, "tri") * 0.3
+            for m in notes) / len(notes)
+    return lp_fft(x, cutoff) * env(int(d * SR), 1.4, 0.6, 0.75, 1.4)
+
+
+def glass_lead(m, d):
+    tt = t(d)
+    vib = 1 + 0.006 * np.sin(2 * np.pi * 5.2 * tt) * np.clip(tt / 0.4, 0, 1)
+    f = midi(m) * vib
+    x = osc(f, d, "sine") * 0.8 + osc(f * 2, d, "sine") * 0.18 + osc(f * 3, d, "tri") * 0.05
+    return x * env(int(d * SR), 0.06, 0.3, 0.6, 0.35)
+
+
+def soft_kick(d=0.4):
+    return osc(np.geomspace(110, 45, int(d * SR)), d) * env(int(d * SR), 0.002, 0.35)
+
+
+def dream_snare(d=0.35):
+    n = lp_fft(rng.standard_normal(int(d * SR)), 4200) * env(int(d * SR), 0.002, 0.3)
+    return n * 0.7 + osc(200, d, "tri") * env(int(d * SR), 0.001, 0.06) * 0.35
+
+
+def shaker(d=0.07):
+    return hp_fft(rng.standard_normal(int(d * SR)), 6500) * env(int(d * SR), 0.015, 0.05)
+
+
+def dream_track(name, bpm, prog, bars, *, drums="none", vowel="ah", lead=None, arp_rate=8,
+                pad_cut=1600, verb_mix=0.45, peak=0.78, bass="long", tremolo=0.0, dark=False):
     beat = 60.0 / bpm
     bar = beat * 4
-    length = bars * bar
-    n = int(length * SR)
-    buf = np.zeros(n + int(4 * SR))  # room for tails; folded back for a seamless loop
+    n = int(bars * bar * SR)
+    gtr = np.zeros(n)      # mono guitar bus -> chorus + ping-pong
+    padL, padR = np.zeros(n), np.zeros(n)
+    low = np.zeros(n)      # bass + kick (kept mono/centred)
+    drm = np.zeros(n)      # snare/shaker -> extra reverb
+    led = np.zeros(n)
     for b in range(bars):
-        root, quality = chords[b % len(chords)]
-        tri = [root, root + (3 if quality == "m" else 4), root + 7]
-        start = b * bar
-        mix_at(buf, pad_chord([m + 12 for m in tri] + [root + 24], bar * 1.05, cutoff=pad_cutoff) * 0.55, start)
+        root, kind = prog[b % len(prog)]
+        tones = [root + iv for iv in CHORD[kind]]
+        st = b * bar
+        # pads: lush synth (wide) + vocal 'aah'
+        pd = lush_pad([m + 12 for m in tones], bar * 1.1, pad_cut)
+        wrap_add(padL, pd * 0.42, st)
+        wrap_add(padR, mod_delay(pd, 12, 2, 0.2) * 0.42, st)
+        vp = vocal_pad([m + 12 for m in tones[:3]], bar * 1.1, vowel)
+        wrap_add(padL, mod_delay(vp, 8, 2, 0.15) * 0.5, st)
+        wrap_add(padR, vp * 0.5, st)
+        # shimmering arpeggio guitar
+        order = [0, 2, 1, 3, 2, 4 if len(tones) > 4 else 1, 3, 2]
+        step = bar / arp_rate
+        for k in range(arp_rate):
+            m = tones[order[k % len(order)] % len(tones)] + 24
+            g = pluck(midi(m), min(1.6, step * 4), 0.55) * env(int(min(1.6, step * 4) * SR), 0.004, 1.2, 0.0, 0.3)
+            if tremolo:
+                tt = t(min(1.6, step * 4))
+                g *= 1 - tremolo * (0.5 + 0.5 * np.sin(2 * np.pi * (bpm / 60 * 2) * tt))
+            wrap_add(gtr, g * (0.55 if k % 2 == 0 else 0.4), st + k * step)
         # bass
-        if bass_style == "drone":
-            mix_at(buf, lp_fft(osc(midi(root - 12), bar, "tri"), 600) * env(int(bar * SR), 0.2, 0.3, 0.8, 0.4) * 0.5, start)
-        elif bass_style == "pulse":
+        if bass == "long":
+            d = bar
+            wrap_add(low, lp_fft(osc(midi(root - 12), d, "sine") + osc(midi(root - 12), d, "tri") * 0.3, 400) * env(int(d * SR), 0.08, 0.4, 0.8, 0.4) * 0.55, st)
+        else:  # eighth-note pulse
             for k in range(8):
                 d = beat / 2
-                m = root - 12 + (7 if k in (3, 7) else 0)
-                tone = lp_fft(osc(midi(m), d, "saw"), 700) * env(int(d * SR), 0.003, 0.18, 0.3, 0.05)
-                mix_at(buf, tone * 0.55, start + k * d)
-        elif bass_style == "walk":
-            for k, iv in enumerate([0, 0, 7, 5]):
-                d = beat
-                tone = lp_fft(osc(midi(root - 12 + iv), d, "tri"), 900) * env(int(d * SR), 0.005, 0.3, 0.4, 0.1)
-                mix_at(buf, tone * 0.5, start + k * beat)
-        # arpeggio
-        steps = len(arp_pattern)
-        step_d = bar / steps
-        for k, idx in enumerate(arp_pattern):
-            if idx is None:
-                continue
-            m = tri[idx % 3] + 12 * (arp_oct + idx // 3)
-            mix_at(buf, pluck(midi(m), min(1.2, step_d * 3), 0.7) * 0.32, start + k * step_d)
-        # optional lead melody (list of (beat_offset, semitone over root, length_beats)) on odd bars
-        if lead and b % 2 == 1:
+                m = root - 12 + (12 if k in (3, 7) else 0)
+                tone = lp_fft(osc(midi(m), d, "saw") * 0.5 + osc(midi(m), d, "sine"), 650 if not dark else 450)
+                wrap_add(low, tone * env(int(d * SR), 0.004, 0.2, 0.4, 0.06) * 0.42, st + k * d)
+        # glassy lead on the second half of each 4-bar phrase
+        if lead and (b % 4) >= 2:
             for off, iv, ln in lead:
-                d = ln * beat
-                m = root + 24 + iv
-                tone = (osc(midi(m), d, "tri") + osc(midi(m) * 2, d, "sine") * 0.2) * env(int(d * SR), 0.02, 0.2, 0.5, 0.15)
-                mix_at(buf, tone * 0.22, start + off * beat)
+                wrap_add(led, glass_lead(root + 24 + iv, ln * beat) * 0.35, st + off * beat)
         # drums
-        if drums:
+        if drums != "none":
             for k in range(16):
-                pos = start + k * beat / 4
-                if drums == "combat":
-                    if k in (0, 6, 8, 11):
-                        mix_at(buf, kick() * 0.85, pos)
-                    if k in (4, 12):
-                        mix_at(buf, snare() * 0.45, pos)
-                    if k % 2 == 0:
-                        mix_at(buf, hat() * 0.22, pos)
-                elif drums == "boss":
-                    if k in (0, 3, 6, 8, 10, 11, 14):
-                        mix_at(buf, kick() * 0.9, pos)
-                    if k in (4, 12):
-                        mix_at(buf, snare() * 0.55, pos)
-                    mix_at(buf, hat(0.04, 8000) * (0.25 if k % 2 == 0 else 0.12), pos)
-                elif drums == "soft":
+                pos = st + k * beat / 4
+                if drums == "soft":
                     if k in (0, 10):
-                        mix_at(buf, kick(0.3) * 0.35, pos)
-                    if k % 4 == 2:
-                        mix_at(buf, hat(0.06, 6000) * 0.12, pos)
-    # fold tails into the start, then add a looping reverb
-    body = buf[:n].copy()
-    body[: len(buf) - n] += buf[n:]
-    body = reverb(body, 2.2 if verb else 1.0, 0.32 if verb else 0.15, wrap=True)
-    save(name, loop_xfade(body), peak)
-
-
-def loop_xfade(x, seconds=0.04):
-    """Crossfade the end of a loop into its start and trim, so playback wraps with no click."""
-    m = int(seconds * SR)
-    ramp = np.linspace(0, 1, m)
-    y = x[: len(x) - m].copy()
-    y[:m] = x[:m] * ramp + x[len(x) - m:] * (1 - ramp)
-    return y
+                        wrap_add(low, soft_kick() * 0.5, pos)
+                    if k in (4, 12):
+                        wrap_add(drm, dream_snare() * 0.35, pos)
+                    if k % 2 == 1:
+                        wrap_add(drm, shaker() * 0.12, pos)
+                elif drums == "drive":
+                    if k in (0, 3, 8, 10):
+                        wrap_add(low, soft_kick() * 0.75, pos)
+                    if k in (4, 12):
+                        wrap_add(drm, dream_snare() * 0.5, pos)
+                    wrap_add(drm, shaker() * (0.16 if k % 2 == 0 else 0.09), pos)
+                elif drums == "dark":
+                    if k in (0, 6, 8, 11, 14):
+                        wrap_add(low, soft_kick(0.5) * 0.85, pos)
+                    if k in (4, 12):
+                        wrap_add(drm, dream_snare(0.45) * 0.55, pos)
+                    if k % 2 == 0:
+                        wrap_add(drm, shaker() * 0.12, pos)
+    # effects
+    gL, gR = chorus(gtr, 1.2)
+    gL, gR = pingpong(gL, gR, beat * 0.75, 0.5, 0.45)
+    lL, lR = chorus(led, 0.6)
+    lL, lR = pingpong(lL, lR, beat * 1.5, 0.45, 0.5)
+    L = gL * 0.8 + padL + lL + drm * 0.9 + low
+    R = gR * 0.8 + padR + lR + drm * 0.9 + low
+    L, R = stereo_reverb(L, R, 3.6 if not dark else 3.0, verb_mix)
+    # keep the low end tight and centred after the wash
+    L = hp_fft(L, 35)
+    R = hp_fft(R, 35)
+    xf = int(0.04 * SR)  # tiny crossfade at the seam
+    ramp = np.linspace(0, 1, xf)
+    for ch in (L, R):
+        ch[:xf] = ch[:xf] * ramp + ch[-xf:] * (1 - ramp)
+    save_stereo(name, L[:-xf], R[:-xf], peak)
 
 
 def music():
-    # Title: slow, wistful (D minor), music-box arpeggio over pads
-    track("music_menu", 68, 8, [(50, "m"), (46, ""), (41, ""), (45, "")],
-          [0, None, 1, 2, None, 1, 3, None], 1, "drone", None, 1100, True,
-          lead=[(0, 7, 1.5), (1.5, 5, 0.5), (2, 3, 2)], peak=0.75)
-    # Map / events: hopeful wandering (A minor -> C)
-    track("music_map", 88, 16, [(45, "m"), (41, ""), (48, ""), (43, "")],
-          [0, 1, 2, 1, 3, 2, 1, 2], 1, "walk", "soft", 1500, True,
-          lead=[(0, 4, 1), (1, 7, 1), (2, 9, 1), (3, 7, 1)], peak=0.75)
-    # Combat: driving (E minor), pulse bass + kit
-    track("music_combat", 124, 16, [(40, "m"), (36, ""), (43, ""), (38, "")],
-          [0, 1, 2, 3, 2, 1, 0, 1, 0, 1, 2, 3, 4, 3, 2, 1], 0, "pulse", "combat", 1800, False,
-          lead=[(0, 7, 0.5), (0.5, 10, 0.5), (1, 12, 1), (2.5, 10, 0.5), (3, 7, 1)], peak=0.8)
-    # Boss: dark and heavy (C minor with a flat-six lift)
-    track("music_boss", 136, 16, [(36, "m"), (32, ""), (36, "m"), (35, "")],
-          [0, 3, 1, 3, 2, 3, 1, 3, 0, 3, 1, 3, 2, 4, 3, 1], 0, "pulse", "boss", 1300, False,
-          lead=[(0, 12, 0.75), (0.75, 11, 0.25), (1, 8, 1), (2, 7, 2)], peak=0.82)
+    # Title: floating, half-asleep (D major): Dmaj7 - Bm7 - Gmaj9 - A6
+    dream_track("music_menu", 72, [(50, "maj7"), (47, "m7"), (43, "maj9"), (45, "6")], 8,
+                drums="none", vowel="ah", arp_rate=8, pad_cut=1400, verb_mix=0.5,
+                lead=[(0, 7, 1.5), (1.5, 4, 0.5), (2, 2, 2)])
+    # Map / events: hazy wandering (F major): Fmaj7 - Am7 - Cmaj7 - Gadd9
+    dream_track("music_map", 84, [(41, "maj7"), (45, "m7"), (48, "maj7"), (43, "add9")], 16,
+                drums="soft", vowel="oo", arp_rate=8, pad_cut=1700, verb_mix=0.45,
+                lead=[(0, 4, 1), (1, 7, 1), (2, 11, 1.5), (3.5, 9, 0.5)])
+    # Combat: driving shoegaze-tinged dream pop (E minor): Em9 - Cmaj7 - Gmaj7 - D6
+    dream_track("music_combat", 104, [(40, "m9"), (36, "maj7"), (43, "maj7"), (38, "6")], 16,
+                drums="drive", vowel="ah", arp_rate=16, pad_cut=1900, verb_mix=0.36, bass="pulse", tremolo=0.25,
+                lead=[(0, 7, 0.5), (0.5, 10, 0.5), (1, 12, 1), (2.5, 14, 0.5), (3, 12, 1)], peak=0.8)
+    # Boss: dark and swirling (C minor): Cm(maj7) - Abmaj7 - Fm9 - Gsus4
+    dream_track("music_boss", 96, [(36, "mmaj7"), (32, "maj7"), (41, "m9"), (43, "sus4")], 16,
+                drums="dark", vowel="oo", arp_rate=16, pad_cut=1200, verb_mix=0.4, bass="pulse", dark=True,
+                lead=[(0, 12, 1), (1, 11, 0.5), (1.5, 8, 1.5), (3, 7, 1)], peak=0.82)
 
 
 if __name__ == "__main__":

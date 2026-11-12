@@ -34,12 +34,45 @@ func _ready() -> void:
 		m.finished.connect(_on_music_finished.bind(m))
 
 
+func sfx_volume() -> float:
+	return clampf(float(SaveManager.profile.get("sfx_vol", 0.8)), 0.0, 1.0)
+
+
+func music_volume() -> float:
+	return clampf(float(SaveManager.profile.get("music_vol", 0.7)), 0.0, 1.0)
+
+
 func sfx_on() -> bool:
-	return SaveManager.profile.get("sfx_on", true)
+	return sfx_volume() > 0.001
 
 
 func music_on() -> bool:
-	return SaveManager.profile.get("music_on", true)
+	return music_volume() > 0.001
+
+
+func _music_target_db() -> float:
+	return MUSIC_DB + linear_to_db(maxf(music_volume(), 0.001))
+
+
+## Called by the volume sliders.
+func apply_volumes() -> void:
+	if not music_on():
+		_fade_out_all()
+		return
+	var active := _active_music()
+	if active == null:
+		var name := _current_music
+		_current_music = ""
+		play_music(name)
+	else:
+		active.volume_db = _music_target_db()
+
+
+func _active_music() -> AudioStreamPlayer:
+	for m in [_music_a, _music_b]:
+		if m.playing and m.volume_db > -55.0:
+			return m
+	return null
 
 
 ## Plays a sound effect. Rapid repeats of the same sound are throttled so stacks of hits stay clean.
@@ -53,7 +86,7 @@ func play(name: String, volume_db: float = 0.0, pitch_jitter: float = 0.06) -> v
 	var p: AudioStreamPlayer = _players[_next]
 	_next = (_next + 1) % POOL
 	p.stream = _sfx[name]
-	p.volume_db = volume_db
+	p.volume_db = volume_db + linear_to_db(sfx_volume())
 	p.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
 	p.play()
 
@@ -80,7 +113,7 @@ func play_music(name: String) -> void:
 	incoming.volume_db = -40.0
 	incoming.play()
 	var tw := create_tween().set_parallel(true)
-	tw.tween_property(incoming, "volume_db", MUSIC_DB, 1.2)
+	tw.tween_property(incoming, "volume_db", _music_target_db(), 1.2)
 	if outgoing.playing:
 		tw.tween_property(outgoing, "volume_db", -60.0, 1.0)
 		tw.chain().tween_callback(outgoing.stop)

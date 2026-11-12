@@ -16,6 +16,8 @@ func _init(id: String = "", px: float = 44.0) -> void:
 
 func _ready() -> void:
 	RelicManager.relic_triggered.connect(_on_trigger)
+	var tip := UI.relic_tip(relic_id)
+	UI.hover_tip(self, tip[0], tip[1])
 
 
 func _on_trigger(id: String) -> void:
@@ -31,6 +33,8 @@ func _process(_d: float) -> void:
 
 
 func _draw() -> void:
+	if size.x < 8.0 or size.y < 8.0:
+		return
 	var r: Dictionary = RelicDatabase.get_relic(relic_id)
 	var col := Color(r["color"])
 	var c := size / 2.0

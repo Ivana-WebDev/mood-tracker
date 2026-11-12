@@ -117,6 +117,57 @@ func _assign_types(nodes: Array, rng: RandomNumberGenerator) -> void:
 	# Make sure there is at least one shop and one elite per act.
 	_guarantee(nodes, "shop", 3, 9, rng)
 	_guarantee(nodes, "elite", 5, 10, rng)
+	_guarantee_mid_rest(nodes, rng)
+
+
+## Every route must pass a rest site between floors 4 and 9, on top of the campfire before the boss.
+func _guarantee_mid_rest(nodes: Array, rng: RandomNumberGenerator) -> void:
+	for attempt in 40:
+		var path := _route_without_mid_rest(nodes)
+		if path.is_empty():
+			return
+		var cands: Array = path.filter(func(n): return n["floor"] >= 4 and n["floor"] <= 9 and n["type"] in ["monster", "event"])
+		# Prefer spots whose neighbours aren't rest sites, so campfires stay spread out.
+		var spaced: Array = cands.filter(func(n):
+			for nx in n["next"]:
+				if nodes[nx]["type"] == "rest":
+					return false
+			for pr in parents_of(nodes, n["id"]):
+				if pr["type"] == "rest":
+					return false
+			return true)
+		var pick_from: Array = spaced if not spaced.is_empty() else cands
+		if pick_from.is_empty():
+			pick_from = path.filter(func(n): return n["floor"] >= 4 and n["floor"] <= 9 and n["type"] != "treasure")
+		if pick_from.is_empty():
+			return
+		pick_from[rng.randi_range(0, pick_from.size() - 1)]["type"] = "rest"
+
+
+func _route_without_mid_rest(nodes: Array) -> Array:
+	var dead := {}
+	for n in nodes:
+		if n["floor"] == 0:
+			var p := _dfs_no_rest(nodes, n, dead)
+			if not p.is_empty():
+				return p
+	return []
+
+
+func _dfs_no_rest(nodes: Array, n: Dictionary, dead: Dictionary) -> Array:
+	if dead.has(n["id"]):
+		return []
+	if n["type"] == "rest" and n["floor"] >= 4 and n["floor"] <= 9:
+		dead[n["id"]] = true
+		return []
+	if n["type"] == "boss":
+		return [n]
+	for nx in n["next"]:
+		var sub := _dfs_no_rest(nodes, nodes[nx], dead)
+		if not sub.is_empty():
+			return [n] + sub
+	dead[n["id"]] = true
+	return []
 
 
 func _guarantee(nodes: Array, t: String, min_f: int, max_f: int, rng: RandomNumberGenerator) -> void:

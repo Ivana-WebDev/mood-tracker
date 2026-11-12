@@ -231,9 +231,9 @@ func _advance_act() -> void:
 	run["act"] = int(run["act"]) + 1
 	run["fights"] = 0
 	run["current_node"] = -1
-	# Reaching a new act restores most of your strength.
-	var missing: int = int(run["max_hp"]) - int(run["hp"])
-	run["hp"] = int(run["hp"]) + int(ceil(missing * 0.75))
+	# Reaching a new act fully restores the hero.
+	run["hp"] = int(run["max_hp"])
+	AudioManager.play("heal")
 	run["map"] = MapManager.generate(int(run["act"]), rng)
 	run_changed.emit()
 	node_done()

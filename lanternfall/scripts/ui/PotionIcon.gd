@@ -15,6 +15,12 @@ func _init(slot: int = 0, id: String = "", px: float = 40.0) -> void:
 	tooltip_text = ""
 
 
+func _ready() -> void:
+	if potion_id != "":
+		var tip := UI.potion_tip(potion_id)
+		UI.hover_tip(self, tip[0], tip[1] + ("\nClick to drink or discard." if index >= 0 else ""))
+
+
 func _process(d: float) -> void:
 	if potion_id != "":
 		_t += d
@@ -22,6 +28,9 @@ func _process(d: float) -> void:
 
 
 func _draw() -> void:
+	# Freshly created icons can draw once before layout gives them a size.
+	if size.x < 8.0 or size.y < 8.0:
+		return
 	var c := size / 2.0
 	var rad := minf(size.x, size.y) / 2.0 - 2.0
 	if potion_id == "":

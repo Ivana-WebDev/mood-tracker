@@ -9,6 +9,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shots="):
 			shots_dir = a.substr(8)
+	SaveManager.profile["music_vol"] = 0.7
+	SaveManager.profile["sfx_vol"] = 0.8
 	main = load("res://scenes/Main.tscn").instantiate()
 	main.name = "Main"
 	get_tree().root.add_child.call_deferred(main)
@@ -102,10 +104,31 @@ func _ready() -> void:
 		await _click(tgt2.get_global_rect().get_center())
 		await _wait(0.3)
 		_check(tgt2.c.hp + tgt2.c.block < hp2 and GameManager.potions().is_empty(), "targeted potion hits the clicked enemy")
+	# Hovering a relic in the top bar shows its description
+	var relic_icon: RelicIcon = main.find_children("*", "RelicIcon", true, false)[0]
+	await _move(relic_icon.get_global_rect().get_center())
+	await _frames(4)
+	var tip_ok: bool = main._tooltip.visible and (main._tooltip.find_child("Title", true, false) as Label).text == RelicDatabase.get_relic(relic_icon.relic_id)["name"]
+	_check(tip_ok, "hovering a relic shows its info")
+	await _move(Vector2(640, 300))
+	await _frames(3)
+	_check(not main._tooltip.visible, "moving away hides the info")
 	# Pause menu must sit above the hand of cards and receive clicks
 	await _click_button("Menu")
 	await _frames(8)
 	await _shot("pause_over_cards")
+	# Music volume slider
+	var slider: HSlider = main.find_children("*", "HSlider", true, false)[0]
+	var mp0 := AudioManager._active_music()
+	var db0: float = mp0.volume_db if mp0 != null else 0.0
+	var sr := slider.get_global_rect()
+	await _drag(Vector2(sr.position.x + sr.size.x * 0.9, sr.get_center().y), Vector2(sr.position.x + sr.size.x * 0.2, sr.get_center().y))
+	await _frames(4)
+	var mp1 := AudioManager._active_music()
+	_check(SaveManager.profile["music_vol"] < 0.4 and mp1 != null and mp1.volume_db < db0 - 3.0, "dragging the Music slider lowers the music (%.0f%%)" % (SaveManager.profile["music_vol"] * 100))
+	SaveManager.profile["music_vol"] = 0.7
+	SaveManager.save_profile()
+	AudioManager.apply_volumes()
 	var resume := _find_button(main, "Resume")
 	_check(resume != null, "pause menu opens in combat")
 	var on_top := true
@@ -121,10 +144,13 @@ func _ready() -> void:
 		on_top = on_top and not main.has_overlay() and cm.energy == en_before
 	_check(on_top, "pause menu draws above cards and Resume click reaches it")
 	# End turn button
-	var t0 := cm.turn
-	await _click_button("End Turn")
-	await _wait(4.0)
-	_check(cm.turn > t0 or cm.phase == "over", "clicking End Turn runs the enemy turn")
+	if is_instance_valid(cm) and cm.phase == "player":
+		var t0 := cm.turn
+		await _click_button("End Turn")
+		await _wait(4.0)
+		_check(not is_instance_valid(cm) or cm.turn > t0 or cm.phase == "over", "clicking End Turn runs the enemy turn")
+	else:
+		print("SKIP  End Turn check: the fight already ended")
 	# Deck button opens viewer, clicking backdrop closes it
 	await _click_button("Deck 10")
 	await _frames(6)
@@ -143,6 +169,18 @@ func _ready() -> void:
 	await _click_button("Close")
 	await _frames(6)
 	_check(not main.has_overlay(), "map overlay closes")
+	# Reward screen: hovering the potion row explains it
+	GameManager.set_pending({"type": "reward", "kind": "monster", "gold": 10, "gold_taken": false, "cards": [], "card_taken": true,
+		"relic": "battle_drum", "relic_taken": false, "boss_relics": [], "potion": "frost_bomb", "potion_taken": false})
+	GameManager.goto("reward", GameManager.run["pending"])
+	await _frames(10)
+	await _shot("reward_rows")
+	var pb := _find_button(main, "Potion: Frost Bomb")
+	if pb != null:
+		await _move(pb.get_global_rect().get_center())
+		await _frames(4)
+		await _shot("reward_hover")
+	_check(pb != null and main._tooltip.visible and (main._tooltip.find_child("Title", true, false) as Label).text == "Frost Bomb", "hovering a reward potion shows its info")
 	print("MOUSE TEST DONE fails=%d" % fails)
 	SaveManager.clear_run()
 	get_tree().quit(1 if fails > 0 else 0)

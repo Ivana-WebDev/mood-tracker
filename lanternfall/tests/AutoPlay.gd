@@ -31,6 +31,7 @@ func _ready() -> void:
 		print("%-9s wins %d/%d  avg floor %.1f  acts %s" % [ch, results[ch]["wins"], RUNS_PER_HERO, avg, str(results[ch]["acts"])])
 	_test_save_roundtrip()
 	_test_shop_potions()
+	_test_act_heal()
 	print("potions drunk across all runs: %d" % _potions_total)
 	failures += failures_logic
 	print("AUTOPLAY DONE failures=%d" % failures)
@@ -234,4 +235,13 @@ func _test_shop_potions() -> void:
 				if ids.count(id) > 1:
 					dupes += 1
 	print("SHOP POTIONS ", "OK (no duplicates in 600 shops)" if dupes == 0 else "FAILED: %d duplicates" % dupes)
+	SaveManager.clear_run()
+
+
+func _test_act_heal() -> void:
+	GameManager.new_run("duskdancer", 9)
+	GameManager.run["hp"] = 5
+	GameManager.run["pending"] = {"type": "reward", "kind": "boss"}
+	GameManager.finish_reward()
+	print("ACT HEAL ", "OK" if int(GameManager.run["hp"]) == int(GameManager.run["max_hp"]) and int(GameManager.run["act"]) == 2 else "FAILED")
 	SaveManager.clear_run()

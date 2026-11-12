@@ -40,12 +40,17 @@ func _build() -> void:
 	if not p.get("potion_taken", false) and p.get("potion", "") != "":
 		var pd := PotionDatabase.get_potion(p["potion"])
 		var full := not GameManager.potion_slots_free()
-		var b := _row("Potion: %s%s" % [pd["name"], "  (slots full)" if full else ""], Color(pd["color"]), _take_potion)
+		var b := _row("Potion: %s%s\n%s" % [pd["name"], "  (slots full)" if full else "", pd["desc"]], Color(pd["color"]), _take_potion)
 		b.disabled = full
+		var pt := UI.potion_tip(p["potion"])
+		UI.hover_tip(b, pt[0], pt[1])
 		_list.add_child(b)
 	if not p.get("relic_taken", false) and p.get("relic", "") != "":
 		var r: Dictionary = RelicDatabase.get_relic(p["relic"])
-		_list.add_child(_row("Relic: %s" % r["name"], Color(r["color"]), _take_relic))
+		var rb := _row("Relic: %s\n%s" % [r["name"], r["desc"]], Color(r["color"]), _take_relic)
+		var rt := UI.relic_tip(p["relic"])
+		UI.hover_tip(rb, rt[0], rt[1])
+		_list.add_child(rb)
 	if not p.get("relic_taken", false) and not p.get("boss_relics", []).is_empty():
 		_list.add_child(_row("Choose a Boss Relic", Palette.RARITY["boss"], _pick_boss_relic))
 	if _list.get_child_count() == 0:
@@ -53,7 +58,12 @@ func _build() -> void:
 
 
 func _row(text: String, color: Color, cb: Callable) -> Button:
-	return UI.accent_button(text, cb, color, Vector2(500, 60))
+	var b := UI.accent_button(text, cb, color, Vector2(500, 60))
+	if "\n" in text:
+		b.add_theme_font_size_override("font_size", 17)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.custom_minimum_size = Vector2(500, 76)
+	return b
 
 
 func _take_gold() -> void:
