@@ -63,7 +63,7 @@ func refresh(target = null) -> void:
 	if _desc:
 		_desc.text = CardDatabase.describe(data, ctx, target)
 		var lines := _desc.get_line_count()
-		_desc.add_theme_font_size_override("font_size", 14 if lines <= 4 else 12)
+		_desc.add_theme_font_size_override("font_size", 14 if lines <= 4 else (12 if lines <= 5 else 11))
 	queue_redraw()
 
 
@@ -148,76 +148,9 @@ func _draw() -> void:
 		draw_string(f, oc + Vector2(-15, 8), str(data["cost"]), HORIZONTAL_ALIGNMENT_CENTER, 30, 21, Palette.BG)
 
 
-## Picks an illustration motif from the card's signature effect.
+## Every card has its own illustration (see CardArt.gd).
 func _draw_art(r: Rect2) -> void:
-	var c := r.get_center()
-	var type_col := Palette.type_color(data["type"])
-	var h := hash(data["id"])
-	# Background flecks unique per card
-	for i in 7:
-		var px := r.position.x + 8 + float((h >> (i * 3)) % 97) / 97.0 * (r.size.x - 16)
-		var py := r.position.y + 6 + float((h >> (i * 2 + 5)) % 61) / 61.0 * (r.size.y - 12)
-		draw_circle(Vector2(px, py), 1.2 + i % 2, Color(1, 1, 1, 0.12))
-	var motif := _motif()
-	var accent := type_col.lightened(0.2)
-	match motif:
-		"gadget":
-			var kind: String = _first_effect("gadget").get("kind", "turret")
-			var gd: Dictionary = CardDatabase.GADGETS[kind]
-			IconDraw.gear(self, c + Vector2(-34, 12), 22, 17, 9, Color("6e6a73"), float(h % 7))
-			IconDraw.gear(self, c + Vector2(36, -16), 14, 11, 7, Color("8a7a5a"), float(h % 5))
-			IconDraw.glow(self, c, 30, Color(gd["color"]), 4)
-			IconDraw.icon(self, gd["icon"], c, 26, Color(gd["color"]))
-		"overclock":
-			IconDraw.gear(self, c, 30, 23, 10, Color("c9a050"), 0.3)
-			IconDraw.icon(self, "bolt", c + Vector2(26, -14), 16, Palette.ENERGY)
-			IconDraw.icon(self, "bolt", c + Vector2(-28, 16), 12, Palette.ENERGY)
-		"dice":
-			IconDraw.glow(self, c, 34, Color("b18cff"), 4)
-			IconDraw.die(self, c + Vector2(-22, 6), 17, 1 + h % 6, Color("f5f1ff"), -0.3)
-			IconDraw.die(self, c + Vector2(20, -6), 17, 1 + (h >> 4) % 6, Color("ffe29a"), 0.25)
-		"flow":
-			IconDraw.ribbon(self, c + Vector2(-50, 18), Vector2(1, -0.3).normalized(), 104, 12, Color("3fd6b4"), float(h % 10), 1.3)
-			IconDraw.ribbon(self, c + Vector2(-50, -10), Vector2(1, 0.25).normalized(), 100, 9, Color("ff8fb8"), float(h % 13), 1.6)
-		"multi":
-			for k in 3:
-				var o := Vector2((k - 1) * 18, (k - 1) * 6)
-				draw_line(c + o + Vector2(-26, -22), c + o + Vector2(22, 24), Color(1, 1, 1, 0.85 - k * 0.2), 4.0 - k, true)
-			IconDraw.icon(self, "attack", c + Vector2(0, 2), 22, accent)
-		"aoe":
-			for k in 3:
-				draw_arc(c + Vector2(-46, 0), 30 + k * 18, -0.8, 0.8, 18, Color(accent, 0.9 - k * 0.25), 4.0, true)
-			IconDraw.icon(self, "attack", c + Vector2(-38, 0), 18, accent)
-		"strike":
-			draw_line(c + Vector2(-44, 24), c + Vector2(44, -26), Color(1, 1, 1, 0.75), 3.0, true)
-			IconDraw.glow(self, c, 22, accent, 3)
-			IconDraw.icon(self, "attack", c, 28, accent)
-		"block":
-			IconDraw.glow(self, c, 34, Palette.BLOCK, 4)
-			IconDraw.icon(self, "shield", c, 28, Palette.BLOCK.lightened(0.1))
-		"debuff":
-			IconDraw.glow(self, c, 30, Palette.DEBUFF, 4)
-			IconDraw.oval(self, c, 30, 16, Color("fff6e6"), 2.0)
-			draw_circle(c, 11, Palette.DEBUFF)
-			draw_circle(c, 5, Palette.BG)
-		"draw":
-			IconDraw.icon(self, "cards", c, 26, Color("dfe6f5"))
-		"energy":
-			IconDraw.glow(self, c, 32, Palette.ENERGY, 4)
-			IconDraw.icon(self, "bolt", c, 28, Palette.ENERGY)
-		"heal":
-			IconDraw.glow(self, c, 30, Palette.GOOD, 4)
-			IconDraw.icon(self, "heart", c, 26, Palette.GOOD.lightened(0.2))
-		"power":
-			for k in 12:
-				var a := k * TAU / 12.0
-				draw_line(c + Vector2(cos(a), sin(a)) * 16, c + Vector2(cos(a), sin(a)) * 36, Color(Palette.POWER, 0.35), 2.0)
-			IconDraw.icon(self, "star", c, 26, Palette.POWER)
-		"curse":
-			IconDraw.icon(self, "debuff", c, 26, Palette.CURSE.lightened(0.3))
-			draw_line(c + Vector2(-30, -20), c + Vector2(30, 22), Color(Palette.BAD, 0.6), 3.0)
-		_:
-			IconDraw.icon(self, data["type"], c, 26, accent)
+	CardArt.draw(self, data, r)
 
 
 func _first_effect(t: String) -> Dictionary:
@@ -235,7 +168,7 @@ func _motif() -> String:
 		match e["type"]:
 			"gadget": return "gadget"
 			"overclock", "wind", "tune": return "overclock"
-			"die_damage", "die_block", "reroll", "add_die", "bump", "set_low", "set_all", "double_high", "dice_sum": return "dice"
+			"die_damage", "die_block", "reroll", "add_die", "bump", "set_low", "set_all", "double_high", "dice_sum", "dice_sum_block": return "dice"
 			"burst": return "flow"
 	for e in effs:
 		if e["type"] == "apply" and e["status"] in ["flow", "grace", "rhythm", "spotlight"]:

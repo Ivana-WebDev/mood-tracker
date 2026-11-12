@@ -84,6 +84,11 @@ func _swap(screen: String, params: Dictionary) -> void:
 	tw.tween_property(s, "modulate:a", 1.0, 0.2)
 	current = s
 	current_name = screen
+	AudioManager.play_music(AudioManager.music_for_screen(screen, params))
+	if screen == "victory":
+		AudioManager.play("victory")
+	elif screen == "game_over":
+		AudioManager.play("defeat")
 
 
 # ------------------------------------------------------------------ overlays

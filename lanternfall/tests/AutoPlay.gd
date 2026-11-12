@@ -30,6 +30,7 @@ func _ready() -> void:
 		avg /= fl.size()
 		print("%-9s wins %d/%d  avg floor %.1f  acts %s" % [ch, results[ch]["wins"], RUNS_PER_HERO, avg, str(results[ch]["acts"])])
 	_test_save_roundtrip()
+	_test_shop_potions()
 	print("potions drunk across all runs: %d" % _potions_total)
 	failures += failures_logic
 	print("AUTOPLAY DONE failures=%d" % failures)
@@ -221,3 +222,16 @@ func _priority(cm: CombatManager, c: Dictionary) -> float:
 	if cm.mechanic == "flow" and d["type"] != cm.last_type:
 		score += 4.0
 	return score
+
+
+func _test_shop_potions() -> void:
+	var dupes := 0
+	for ch in CharacterDatabase.ORDER:
+		GameManager.new_run(ch, 500)
+		for i in 200:
+			var ids: Array = GameManager._make_shop_stock()["potions"].map(func(p): return p["id"])
+			for id in ids:
+				if ids.count(id) > 1:
+					dupes += 1
+	print("SHOP POTIONS ", "OK (no duplicates in 600 shops)" if dupes == 0 else "FAILED: %d duplicates" % dupes)
+	SaveManager.clear_run()

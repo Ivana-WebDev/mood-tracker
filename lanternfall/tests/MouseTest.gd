@@ -17,6 +17,8 @@ func _ready() -> void:
 	await _click_button("New Run")
 	await _frames(10)
 	_check(main.current_name == "char_select", "clicking New Run opens hero select")
+	_check(AudioManager._sfx.size() == AudioManager.SFX.size(), "all %d sound effects loaded" % AudioManager.SFX.size())
+	_check(AudioManager._music_a.playing or AudioManager._music_b.playing, "title music is playing")
 	await _click_button("Embark")
 	await _frames(10)
 	_check(main.current_name == "map", "clicking Embark starts a run on the map")
@@ -27,6 +29,9 @@ func _ready() -> void:
 	await _click(p)
 	await _wait(1.3)
 	_check(main.current_name == "combat", "clicking a map node starts combat")
+	await _wait(1.5)
+	var mp: AudioStreamPlayer = AudioManager._music_a if AudioManager._music_a.volume_db > AudioManager._music_b.volume_db else AudioManager._music_b
+	_check(AudioManager._current_music == "combat" and mp.playing and mp.stream.resource_path.ends_with("music_combat.wav"), "combat music crossfades in")
 	var scr = main.current
 	var cm: CombatManager = scr.cm
 	# Hover lifts a card

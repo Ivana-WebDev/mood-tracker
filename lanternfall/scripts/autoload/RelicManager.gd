@@ -17,6 +17,8 @@ func add_relic(id: String) -> void:
 	if id == "" or has(id):
 		return
 	GameManager.run["relics"].append(id)
+	if GameManager.run["relics"].size() > 1:
+		AudioManager.play("relic")
 	_on_pickup(id)
 	relics_changed.emit()
 	GameManager.run_changed.emit()

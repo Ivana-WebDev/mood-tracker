@@ -52,6 +52,16 @@ const CARDS := {
 		"effects": [{"type": "gadget", "kind": "cannon", "power": 12, "turns": 2, "up": {"power": 16}}]},
 	"c_perpetual": {"name": "Perpetual Motion", "cost": 3, "type": "power", "rarity": "rare", "owner": "clockwright", "target": "none",
 		"effects": [{"type": "apply", "status": "perpetual", "value": 1, "target": "self"}], "up": {"cost": 2}},
+	"c_oil_slick": {"name": "Oil Slick", "cost": 1, "type": "skill", "rarity": "common", "owner": "clockwright", "target": "enemy",
+		"effects": [{"type": "apply", "status": "weak", "value": 2, "up": 3}, {"type": "tune", "value": 1}]},
+	"c_bolt_gun": {"name": "Bolt Gun", "cost": 0, "type": "attack", "rarity": "common", "owner": "clockwright", "target": "enemy",
+		"effects": [{"type": "damage", "value": 3, "times": 2, "up": 4}]},
+	"c_spring_trap": {"name": "Spring Trap", "cost": 1, "type": "skill", "rarity": "uncommon", "owner": "clockwright", "target": "none",
+		"effects": [{"type": "block", "value": 6, "up": 9}, {"type": "apply", "status": "thorns", "value": 3, "target": "self"}]},
+	"c_mech_suit": {"name": "Mech Suit", "cost": 2, "type": "skill", "rarity": "rare", "owner": "clockwright", "target": "none",
+		"exhaust": true, "effects": [{"type": "gadget", "kind": "barrier", "power": 7, "turns": 3, "up": {"power": 9}}, {"type": "gadget", "kind": "tesla", "power": 3, "turns": 3, "up": {"power": 4}}]},
+	"c_chain_reaction": {"name": "Chain Reaction", "cost": 2, "type": "attack", "rarity": "rare", "owner": "clockwright", "target": "none",
+		"effects": [{"type": "damage_per", "count": "gadgets", "base": 2, "per": 6, "target": "all", "up": {"per": 8}}]},
 
 	# ------------------------------------------------------------- FATEBINDER
 	# Mechanic: Fate Dice. Roll 3 dice every turn; cards spend, reroll and reshape them.
@@ -95,6 +105,16 @@ const CARDS := {
 		"effects": [{"type": "dice_sum", "mult": 2, "base": 0, "up": {"mult": 3}}]},
 	"f_rewrite": {"name": "Rewrite Fate", "cost": 1, "type": "skill", "rarity": "rare", "owner": "fatebinder", "target": "none",
 		"exhaust": true, "effects": [{"type": "set_all", "value": 6}, {"type": "add_die", "value": 6, "up": {"count": 2}}]},
+	"f_hedge_bet": {"name": "Hedge Bet", "cost": 1, "type": "skill", "rarity": "common", "owner": "fatebinder", "target": "none",
+		"effects": [{"type": "block", "value": 5, "up": 8}, {"type": "add_die"}]},
+	"f_high_roller": {"name": "High Roller", "cost": 1, "type": "attack", "rarity": "common", "owner": "fatebinder", "target": "none",
+		"effects": [{"type": "die_damage", "pick": "high", "mult": 1, "bonus": 3, "target": "all", "up": {"bonus": 6}}]},
+	"f_card_trick": {"name": "Card Trick", "cost": 1, "type": "skill", "rarity": "uncommon", "owner": "fatebinder", "target": "none",
+		"effects": [{"type": "draw", "value": 2, "up": 3}, {"type": "reroll"}]},
+	"f_twist_of_fate": {"name": "Twist of Fate", "cost": 1, "type": "power", "rarity": "rare", "owner": "fatebinder", "target": "none",
+		"effects": [{"type": "apply", "status": "fortune", "value": 1, "target": "self"}], "up": {"cost": 0}},
+	"f_house_edge": {"name": "House Edge", "cost": 1, "type": "skill", "rarity": "rare", "owner": "fatebinder", "target": "none",
+		"exhaust": true, "effects": [{"type": "dice_sum_block", "mult": 2, "base": 0, "up": {"base": 8}}]},
 
 	# ------------------------------------------------------------- DUSKDANCER
 	# Mechanic: Flow. Playing a different card type than the previous card builds Flow (max 6);
@@ -139,20 +159,16 @@ const CARDS := {
 		"effects": [{"type": "damage", "value": 14, "up": 18}, {"type": "apply", "status": "flow", "value": 2, "target": "self"}]},
 	"d_ovation": {"name": "Standing Ovation", "cost": 1, "type": "skill", "rarity": "rare", "owner": "duskdancer", "target": "none",
 		"exhaust": true, "effects": [{"type": "apply", "status": "flow", "value": 4, "target": "self", "up": 6}]},
-
-	# ----------------------------------------------------------------- NEUTRAL
-	"n_bandage": {"name": "Bandage", "cost": 0, "type": "skill", "rarity": "uncommon", "owner": "neutral", "target": "none",
-		"exhaust": true, "effects": [{"type": "heal", "value": 4, "up": 6}]},
-	"n_flashbang": {"name": "Flashbang", "cost": 0, "type": "skill", "rarity": "uncommon", "owner": "neutral", "target": "none",
-		"effects": [{"type": "apply", "status": "weak", "value": 1, "target": "all", "up": 2}, {"type": "draw", "value": 1}]},
-	"n_second_wind": {"name": "Second Wind", "cost": 1, "type": "skill", "rarity": "uncommon", "owner": "neutral", "target": "none",
-		"exhaust": true, "effects": [{"type": "block", "value": 12, "up": 16}]},
-	"n_quickstep": {"name": "Quickstep", "cost": 0, "type": "skill", "rarity": "uncommon", "owner": "neutral", "target": "none",
-		"effects": [{"type": "block", "value": 2, "up": 4}, {"type": "draw", "value": 1}]},
-	"n_crushing_blow": {"name": "Crushing Blow", "cost": 2, "type": "attack", "rarity": "uncommon", "owner": "neutral", "target": "enemy",
-		"effects": [{"type": "damage", "value": 15, "up": 20}]},
-	"n_battle_trance": {"name": "Battle Trance", "cost": 0, "type": "skill", "rarity": "rare", "owner": "neutral", "target": "none",
-		"exhaust": true, "effects": [{"type": "draw", "value": 3, "up": 4}]},
+	"d_spin_kick": {"name": "Spin Kick", "cost": 2, "type": "attack", "rarity": "common", "owner": "duskdancer", "target": "enemy",
+		"effects": [{"type": "damage", "value": 11, "up": 15}, {"type": "block", "value": 4}]},
+	"d_curtsy": {"name": "Curtsy", "cost": 1, "type": "skill", "rarity": "common", "owner": "duskdancer", "target": "none",
+		"effects": [{"type": "block", "value": 5, "up": 8}, {"type": "draw", "value": 1}]},
+	"d_tango": {"name": "Tango", "cost": 1, "type": "attack", "rarity": "uncommon", "owner": "duskdancer", "target": "enemy",
+		"effects": [{"type": "damage", "value": 5, "up": 7}, {"type": "apply", "status": "vulnerable", "value": 1}, {"type": "apply", "status": "flow", "value": 1, "target": "self"}]},
+	"d_masquerade": {"name": "Masquerade", "cost": 1, "type": "power", "rarity": "rare", "owner": "duskdancer", "target": "none",
+		"effects": [{"type": "apply", "status": "masque", "value": 2, "target": "self", "up": 3}]},
+	"d_pas_de_deux": {"name": "Pas de Deux", "cost": 1, "type": "attack", "rarity": "rare", "owner": "duskdancer", "target": "enemy",
+		"effects": [{"type": "damage", "value": 4, "times": 3, "up": 5}, {"type": "apply", "status": "flow", "value": 1, "target": "self"}]},
 
 	# --------------------------------------------------------- STATUS / CURSES
 	"x_wound": {"name": "Wound", "cost": -1, "type": "status", "rarity": "special", "owner": "curse", "target": "none",
@@ -191,9 +207,11 @@ const STATUS_INFO := {
 	"grace": {"name": "Grace", "desc": "Repeating a card type only loses 1 Flow instead of all of it.", "buff": true},
 	"rhythm": {"name": "Rhythm", "desc": "At the start of each turn, gain X Flow.", "buff": true},
 	"spotlight": {"name": "Spotlight", "desc": "Flow bonuses are doubled.", "buff": true},
+	"masque": {"name": "Masquerade", "desc": "Whenever you gain Flow, gain X Block.", "buff": true},
+	"fortune": {"name": "Twist of Fate", "desc": "At the start of your turn, your lowest Fate Die becomes a 6.", "buff": true},
 }
 
-const POWER_STATUSES := ["amplify", "factory", "perpetual", "lucky", "extra_die", "fate_six", "grace", "rhythm", "spotlight"]
+const POWER_STATUSES := ["amplify", "factory", "perpetual", "lucky", "extra_die", "fate_six", "grace", "rhythm", "spotlight", "masque", "fortune"]
 const FLOW_MAX := 6
 
 const DECAYING := ["vulnerable", "weak"]
@@ -359,14 +377,16 @@ static func _describe_effect(e: Dictionary, card: Dictionary, ctx, target) -> St
 			var what2 := "Gadget" if e["count"] == "gadgets" else status_name(e["count"])
 			if ctx != null:
 				var raw: int = int(e["base"]) + int(e["per"]) * ctx.count_of(e["count"])
-				return "Deal %d damage (%d + %d per %s)." % [_dmg(raw, ctx, target), int(e["base"]), int(e["per"]), what2]
-			return "Deal %d damage +%d per %s." % [int(e["base"]), int(e["per"]), what2]
+				return "Deal %d damage%s (%d + %d per %s)." % [_dmg(raw, ctx, target if tgt == "enemy" else null), " to ALL enemies" if tgt == "all" else "", int(e["base"]), int(e["per"]), what2]
+			return "Deal %d damage +%d per %s%s." % [int(e["base"]), int(e["per"]), what2, " to ALL enemies" if tgt == "all" else ""]
 		# --- Fatebinder
 		"die_damage":
 			var s3 := "Spend your %s die: deal %dx its value" % [_pick_word(e["pick"]), int(e["mult"])]
 			if int(e.get("bonus", 0)) > 0:
 				s3 += " +%d" % int(e["bonus"])
 			s3 += " damage"
+			if tgt == "all":
+				s3 += " to ALL enemies"
 			if ctx != null and not ctx.dice.is_empty():
 				var v: int = ctx.peek_die(e["pick"])
 				s3 += " (%d)" % _dmg(v * int(e["mult"]) + int(e.get("bonus", 0)), ctx, target)
@@ -402,6 +422,14 @@ static func _describe_effect(e: Dictionary, card: Dictionary, ctx, target) -> St
 			if ctx != null:
 				s5 += " (%d)" % _dmg(ctx.dice_total() * int(e["mult"]) + int(e.get("base", 0)), ctx, target)
 			return s5 + "."
+		"dice_sum_block":
+			var s7 := "Spend ALL dice: gain %sthe total" % ("" if int(e["mult"]) == 1 else "%dx " % int(e["mult"]))
+			if int(e.get("base", 0)) > 0:
+				s7 += " +%d" % int(e["base"])
+			s7 += " Block"
+			if ctx != null:
+				s7 += " (%d)" % (ctx.dice_total() * int(e["mult"]) + int(e.get("base", 0)))
+			return s7 + "."
 		# --- Duskdancer
 		"burst":
 			var sn := status_name(e["status"])

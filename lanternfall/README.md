@@ -10,12 +10,13 @@ Everything is drawn in code with vector shapes: outlined, cel-shaded characters 
 
 | System | Details |
 |---|---|
-| **Heroes** | **Clockwright** deploys **Gadgets** (turrets, barrier nodes, tesla coils, repair drones, a siege cannon) into 3 slots; they fire on their own each turn and *Overclock* cards fire them early. **Fatebinder** rolls 3 **Fate Dice** each turn and spends, rerolls and reshapes them. **Duskdancer** builds **Flow** by alternating card types; Flow boosts every hit and every Block, and repeating a type breaks it. Each hero has a 10-card starter deck, a starter relic and 20 class cards. |
-| **Cards** | 68 cards in total: 60 class cards, 6 neutral cards and 2 statuses/curses. Each card is a list of effects defined as data. Upgrades are written into the card definition, and card text is generated from the effects, showing live numbers that include Strength, Weak and Vulnerable. |
+| **Heroes** | **Clockwright** deploys **Gadgets** (turrets, barrier nodes, tesla coils, repair drones, a siege cannon) into 3 slots; they fire on their own each turn and *Overclock* cards fire them early. **Fatebinder** rolls 3 **Fate Dice** each turn and spends, rerolls and reshapes them. **Duskdancer** builds **Flow** by alternating card types; Flow boosts every hit and every Block, and repeating a type breaks it. Each hero has a 10-card starter deck, a starter relic and **25 cards of their own**: 4 starter, 9 common, 7 uncommon and 5 rare. No card is shared between heroes. |
+| **Cards** | 77 cards in total: 75 hero cards and 2 statuses/curses. **Every card has its own hand-made vector illustration** (`scripts/ui/CardArt.gd`), drawn over a hero-themed background: a brass workshop, starry velvet, or a moonlit stage. Each card is a list of effects defined as data. Upgrades are written into the card definition, and card text is generated from the effects, showing live numbers that include Strength, Weak and Vulnerable. |
 | **Combat** | Energy, draw/discard/exhaust piles, Block, and enemy intents with damage previews. Statuses: Strength, Dexterity, Vulnerable, Weak, Bleed, Thorns, Charge, Ritual, Regen, plus power effects such as Bulwark, Steadfast, Rising Fury, Serrated, Phantom Blades, Overflow and Ley Line. |
 | **Enemies** | 15 enemies: 9 normal, 4 elite, 2 bosses (*The Hollow King* and *The Lantern Wyrm*). Each follows a cycling or weighted-random move pattern. |
 | **Map** | Generated per act: 12 floors plus a boss, 7 lanes, 6 paths that never cross. Node types: monster, elite, event, rest, shop, treasure, boss. The map scrolls horizontally to suit landscape screens. |
-| **Potions** | You carry up to 3 single-use potions, shown in the top bar. There are 13 in total: 10 for any hero, plus 1 hero-specific potion for each. Examples: Fire Flask, Frost Bomb, Iron Tonic, Ember Brew; Overdrive Oil, Liquid Luck and Rhythm Tonic are the hero ones. They drop after fights (40% of normal fights, 60% of elites, always after a boss) and are sold in shops. Click a potion to drink or discard it. Targeted potions ask you to pick an enemy; healing potions also work outside combat. |
+| **Potions** | You carry up to 3 single-use potions, shown in the top bar. There are 13 in total: 10 for any hero, plus 1 hero-specific potion for each. Examples: Fire Flask, Frost Bomb, Iron Tonic, Ember Brew; Overdrive Oil, Liquid Luck and Rhythm Tonic are the hero ones. They drop after some fights (30% of normal fights and 45% of elites; bosses never drop one, and the chance halves right after a fight that dropped one). Shops sell 3 different potions. Click a potion to drink or discard it. Targeted potions ask you to pick an enemy; healing potions also work outside combat. |
+| **Sound & music** | 21 sound effects (cards, hits, Block, gold, gadgets, dice, Flow, potions and more) and 4 looping music tracks (title, map, combat, boss) with crossfades. All of it is original and synthesised by `tools/gen_audio.py` (numpy), with no third-party samples. Music and sound can be switched on and off separately in Settings. |
 | **Relics** | 21 relics: starter, common, uncommon, rare and boss. Their effects hook into combat start, turn start/end, card played, enemy death, lethal damage, prices and gold. |
 | **Economy / nodes** | Card rewards weighted by rarity, elite relics, a choice of 3 boss relics, a shop (cards, relics, card removal), campfires (rest or upgrade), 5 events and treasure chests. |
 | **Persistence** | The run auto-saves after every action, including when Android pauses the app. **Continue** resumes on the exact node you were on. A profile keeps stats and settings (fast combat, screen shake, fullscreen). The top bar has a **Map** button, so you can check the route from events, shops, rest sites and combat. |
@@ -129,3 +130,12 @@ GitHub Actions builds all three on every push and uploads them as the artifacts 
 | `F11` / `Alt+Enter` | Toggle fullscreen (remembered between sessions) |
 
 **Unsigned builds:** the desktop builds aren't code-signed. Windows SmartScreen may show "Windows protected your PC"; click **More info → Run anyway**. On macOS, unzip the file, then right-click **Lanternfall.app → Open** the first time. On Linux, run `chmod +x Lanternfall.x86_64` first.
+
+---
+
+## Regenerating the audio
+
+```bash
+pip install numpy
+python3 lanternfall/tools/gen_audio.py   # writes lanternfall/audio/*.wav
+```

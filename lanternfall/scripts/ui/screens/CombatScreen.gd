@@ -78,6 +78,9 @@ func _ready() -> void:
 	cm.enemy_turn_started.connect(_on_enemy_turn)
 	cm.enemy_acting.connect(func(who, mv): _on_float(who, mv, Palette.GOLD))
 	cm.combat_ended.connect(_on_combat_ended)
+	cm.potion_used.connect(func(_id): AudioManager.play("potion"))
+	cm.dice_changed.connect(_on_dice_sound)
+	cm.enemy_died.connect(func(_w): AudioManager.play("enemy_die"))
 	resized.connect(_layout)
 	_layout()
 	cm.start()
@@ -165,6 +168,7 @@ func _sync_hand() -> void:
 			v.hover_changed.connect(_on_card_hover)
 			hand_layer.add_child(v)
 			card_views[int(c["uid"])] = v
+			AudioManager.play("draw", -8.0, 0.15)
 	for uid in card_views.keys():
 		if not uids.has(uid):
 			var v: CardView = card_views[uid]
@@ -352,6 +356,7 @@ func _try_play(v: CardView, target: Combatant) -> void:
 		_layout_hand()
 		return
 	v.set_meta("played", true)
+	AudioManager.play("card", -2.0)
 	if not cm.play_card(v.inst, target):
 		v.set_meta("played", false)
 		_layout_hand()
@@ -464,8 +469,18 @@ func _on_float(who: Combatant, text: String, color: Color) -> void:
 	var v := _view_for(who)
 	if text.begins_with("+") and color == Palette.BLOCK:
 		HitFX.spawn(fx_layer, _fx_at(who), "block", Palette.BLOCK)
+		AudioManager.play("block", -3.0)
 	elif text.begins_with("+") and color == Palette.GOOD:
 		HitFX.spawn(fx_layer, _fx_at(who), "heal", Palette.GOOD)
+		AudioManager.play("heal", -3.0)
+	elif text.begins_with("Flow +"):
+		AudioManager.play("flow", -4.0)
+	elif text == "Blocked":
+		AudioManager.play("block", -3.0)
+	elif color == Palette.DEBUFF and not text.begins_with("-"):
+		AudioManager.play("debuff", -6.0)
+	elif color == Palette.BUFF:
+		AudioManager.play("buff", -6.0)
 	var l := UI.label(text, 26 if text.begins_with("-") else 20, color, HORIZONTAL_ALIGNMENT_CENTER)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	l.add_theme_constant_override("font_outline_size", 6)
@@ -489,7 +504,18 @@ func _fx_at(who: Combatant) -> Vector2:
 	return v.position + v.body_center()
 
 
+var _last_dice: Array = []
+
+
+func _on_dice_sound() -> void:
+	# Rolls/rerolls rattle; spending a die is silent.
+	if cm.dice.size() >= _last_dice.size() and cm.dice != _last_dice:
+		AudioManager.play("dice", -2.0)
+	_last_dice = cm.dice.duplicate()
+
+
 func _on_gadget_fired(i: int) -> void:
+	AudioManager.play("zap", -4.0)
 	if mech_hud == null or i >= cm.gadgets.size():
 		return
 	var g: Dictionary = cm.gadgets[i]
@@ -504,6 +530,7 @@ func _on_gadget_fired(i: int) -> void:
 
 
 func _on_hit(who: Combatant) -> void:
+	AudioManager.play("hurt" if who.is_player else "hit")
 	_view_for(who).play_hit()
 	HitFX.spawn(fx_layer, _fx_at(who), "slash", Palette.HP.lightened(0.3) if who.is_player else Palette.GOLD)
 	if who.is_player and SaveManager.profile.get("screen_shake", true):
@@ -523,11 +550,13 @@ func _flash_banner(text: String, color: Color) -> void:
 
 
 func _on_turn_started(turn: int) -> void:
+	AudioManager.play("turn", -4.0)
 	_flash_banner("Your Turn" if turn > 1 else "Battle Start", Palette.GOLD)
 	_refresh()
 
 
 func _on_enemy_turn() -> void:
+	AudioManager.play("enemy_turn", -3.0)
 	selected = null
 	_flash_banner("Enemy Turn", Palette.BAD)
 	_refresh()
@@ -549,10 +578,12 @@ func _on_combat_ended(victory: bool) -> void:
 	for uid in card_views:
 		card_views[uid].mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if victory:
+		AudioManager.play("victory", -2.0)
 		_flash_banner("Victory!", Palette.GOOD)
 		await get_tree().create_timer(1.1).timeout
 		GameManager.on_combat_won(params.get("kind", "monster"), cm.player.hp)
 	else:
+		AudioManager.play("defeat")
 		_flash_banner("Defeated", Palette.BAD)
 		await get_tree().create_timer(1.5).timeout
 		GameManager.on_combat_lost()

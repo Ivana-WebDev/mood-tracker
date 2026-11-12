@@ -28,6 +28,7 @@ static func button(text: String, callback: Callable, min_size: Vector2 = Vector2
 	b.custom_minimum_size = min_size
 	b.add_theme_font_size_override("font_size", font_size)
 	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(func(): AudioManager.play("click", -6.0))
 	b.pressed.connect(callback)
 	return b
 

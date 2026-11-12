@@ -9,7 +9,7 @@ const STATUS_ICONS := {
 	"strength": "attack", "dexterity": "shield", "vulnerable": "debuff", "weak": "down", "bleed": "fire",
 	"thorns": "ring", "ritual": "star", "regen": "heart", "flow": "ribbon", "grace": "ribbon", "rhythm": "bell",
 	"spotlight": "star", "amplify": "gear", "factory": "gear", "perpetual": "gear", "lucky": "die",
-	"extra_die": "die", "fate_six": "star",
+	"extra_die": "die", "fate_six": "star", "masque": "ribbon", "fortune": "die",
 }
 
 var c: Combatant

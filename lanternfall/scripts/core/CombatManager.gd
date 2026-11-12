@@ -229,6 +229,9 @@ func start_player_turn() -> void:
 		dice.clear()
 		for i in 3 + player.get_status("extra_die"):
 			dice.append(roll_die())
+		for i in player.get_status("fortune"):
+			if not dice.is_empty():
+				dice[_die_index("low")] = 6
 		dice_changed.emit()
 	for i in player.get_status("factory"):
 		deploy_gadget("turret", 2, 2)
@@ -272,6 +275,8 @@ func apply_status(c: Combatant, status: String, amount: int) -> void:
 		if amount <= 0:
 			return
 	c.add_status(status, amount)
+	if status == "flow" and c.is_player and amount > 0 and c.get_status("masque") > 0:
+		c.block += c.get_status("masque") * amount
 	var info: Dictionary = CardDatabase.STATUS_INFO.get(status, {"buff": true})
 	floating_text.emit(c, "%s %+d" % [CardDatabase.status_name(status), amount], Palette.BUFF if info["buff"] else Palette.DEBUFF)
 	state_changed.emit()
@@ -407,7 +412,9 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 			"block_per":
 				gain_block(player, int(e["value"]) * count_of(e["count"]))
 			"damage_per":
-				attack(player, target, int(e["base"]) + int(e["per"]) * count_of(e["count"]))
+				var rawp: int = int(e["base"]) + int(e["per"]) * count_of(e["count"])
+				for t in _targets(tk, target):
+					attack(player, t, rawp)
 			# --- Gadgets
 			"gadget":
 				deploy_gadget(e["kind"], int(e["power"]), int(e["turns"]))
@@ -425,7 +432,8 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 			# --- Dice
 			"die_damage":
 				var v := spend_die(e["pick"])
-				attack(player, target, v * int(e["mult"]) + int(e.get("bonus", 0)))
+				for t in _targets(tk, target):
+					attack(player, t, v * int(e["mult"]) + int(e.get("bonus", 0)))
 			"die_block":
 				var v2 := spend_die(e["pick"])
 				gain_block(player, preview_block(v2 * int(e["mult"]) + int(e.get("bonus", 0))))
@@ -460,6 +468,11 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 				while not dice.is_empty():
 					total += spend_die("high")
 				attack(player, target, total * int(e["mult"]) + int(e.get("base", 0)))
+			"dice_sum_block":
+				var tb := 0
+				while not dice.is_empty():
+					tb += spend_die("high")
+				gain_block(player, tb * int(e["mult"]) + int(e.get("base", 0)))
 
 
 # ------------------------------------------------------------------ potions

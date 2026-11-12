@@ -97,6 +97,7 @@ func clear_pending() -> void:
 func enter_node(node_id: int) -> void:
 	if not MapManager.available_nodes(run).has(node_id):
 		return
+	AudioManager.play("select")
 	var node: Dictionary = run["map"]["nodes"][node_id]
 	node["visited"] = true
 	run["current_node"] = node_id
@@ -180,8 +181,13 @@ func on_combat_won(kind: String, hp_left: int) -> void:
 	gold = int(round(gold * RelicManager.gold_multiplier()))
 	var reward := {"type": "reward", "kind": kind, "gold": gold, "gold_taken": false,
 		"cards": roll_card_rewards(kind), "card_taken": false, "relic": "", "relic_taken": false, "boss_relics": []}
-	var potion_chance: float = {"monster": 0.4, "elite": 0.6, "boss": 1.0}.get(kind, 0.4)
+	# Potions are an occasional bonus: 30% after normal fights, 45% after elites, none from bosses,
+	# and the chance halves right after a fight that already dropped one.
+	var potion_chance: float = {"monster": 0.30, "elite": 0.45, "boss": 0.0}.get(kind, 0.3)
+	if run.get("last_fight_potion", false):
+		potion_chance *= 0.5
 	reward["potion"] = roll_potion() if rng.randf() < potion_chance else ""
+	run["last_fight_potion"] = reward["potion"] != ""
 	reward["potion_taken"] = false
 	if kind == "elite":
 		reward["relic"] = RelicManager.roll_relic(_roll_relic_rarity())
@@ -256,12 +262,8 @@ func roll_card_rewards(kind: String, count: int = 3) -> Array:
 
 func _roll_card_of(rarity: String) -> String:
 	var ch: String = run["character"]
+	# Every card in a hero's reward pool belongs to that hero; nothing is shared.
 	var pool: Array = CardDatabase.pool(ch, rarity)
-	# Neutral cards occasionally appear in reward pools.
-	if rarity != "common" and rng.randf() < 0.18:
-		var neutral := CardDatabase.pool("neutral", rarity)
-		if not neutral.is_empty():
-			pool = neutral
 	if pool.is_empty():
 		pool = CardDatabase.pool(ch, "common")
 	return pool[rng.randi_range(0, pool.size() - 1)]
@@ -291,16 +293,13 @@ func relic_price(rarity: String) -> int:
 
 func _make_shop_stock() -> Dictionary:
 	var cards: Array = []
-	for rarity in ["common", "common", "uncommon", "uncommon", "rare"]:
+	for rarity in ["common", "common", "common", "uncommon", "uncommon", "rare"]:
 		for attempt in 10:
 			var id := CardDatabase.pool(run["character"], rarity)
 			var pick: String = id[rng.randi_range(0, id.size() - 1)]
 			if not cards.any(func(c): return c["id"] == pick):
 				cards.append({"id": pick, "upgraded": false, "price": card_price(rarity), "sold": false})
 				break
-	var neutral := CardDatabase.pool("neutral", "uncommon")
-	var nid: String = neutral[rng.randi_range(0, neutral.size() - 1)]
-	cards.append({"id": nid, "upgraded": false, "price": card_price("uncommon"), "sold": false})
 	var relics: Array = []
 	var taken: Array = []
 	for rarity in ["common", "uncommon", "rare"]:
@@ -309,8 +308,10 @@ func _make_shop_stock() -> Dictionary:
 			taken.append(r)
 			relics.append({"id": r, "price": relic_price(RelicDatabase.get_relic(r)["rarity"]), "sold": false})
 	var potions: Array = []
+	var seen: Array = []
 	for i in 3:
-		var pid := roll_potion()
+		var pid := roll_potion(seen)
+		seen.append(pid)
 		potions.append({"id": pid, "price": int(round(PotionDatabase.price(PotionDatabase.get_potion(pid)["rarity"]) * rng.randf_range(0.9, 1.1) * RelicManager.price_multiplier())), "sold": false})
 	return {"cards": cards, "relics": relics, "potions": potions, "removed": false}
 
@@ -327,11 +328,16 @@ func potion_slots_free() -> bool:
 	return potions().size() < PotionDatabase.MAX_SLOTS
 
 
-func roll_potion() -> String:
+func roll_potion(exclude: Array = []) -> String:
+	var ch: String = run.get("character", "")
 	var rarity := _weighted({"common": 64, "uncommon": 29, "rare": 7})
-	var pool := PotionDatabase.pool(run.get("character", ""), rarity)
+	var pool := PotionDatabase.pool(ch, rarity).filter(func(x): return not exclude.has(x))
 	if pool.is_empty():
-		pool = PotionDatabase.pool(run.get("character", ""), "common")
+		# Fall back to any rarity that still has an unused potion.
+		for r in ["common", "uncommon", "rare"]:
+			pool = PotionDatabase.pool(ch, r).filter(func(x): return not exclude.has(x))
+			if not pool.is_empty():
+				break
 	return pool[rng.randi_range(0, pool.size() - 1)]
 
 
@@ -339,6 +345,7 @@ func add_potion(id: String) -> bool:
 	if id == "" or not potion_slots_free():
 		return false
 	potions().append(id)
+	AudioManager.play("potion", -4.0)
 	run_changed.emit()
 	return true
 
@@ -360,6 +367,7 @@ func use_potion_outside_combat(index: int) -> bool:
 	for e in p["effects"]:
 		if e["type"] == "heal":
 			change_hp(int(e["value"]))
+	AudioManager.play("heal")
 	potions().remove_at(index)
 	SaveManager.save_run()
 	run_changed.emit()
@@ -369,6 +377,7 @@ func use_potion_outside_combat(index: int) -> bool:
 # ------------------------------------------------------------------ deck + stats mutations
 
 func add_card(id: String, upgraded: bool = false) -> void:
+	AudioManager.play("card", -3.0)
 	run["deck"].append({"uid": new_uid(), "id": id, "upgraded": upgraded})
 	run_changed.emit()
 
@@ -383,6 +392,7 @@ func remove_card(uid: int) -> void:
 
 
 func upgrade_card(uid: int) -> void:
+	AudioManager.play("buff")
 	for c in run["deck"]:
 		if int(c["uid"]) == uid and CardDatabase.can_upgrade(c["id"]):
 			c["upgraded"] = true
@@ -397,6 +407,7 @@ func add_gold(amount: int) -> void:
 	run["gold"] = maxi(0, int(run["gold"]) + amount)
 	if amount > 0:
 		run["stats"]["gold_earned"] = int(run["stats"]["gold_earned"]) + amount
+		AudioManager.play("gold")
 	run_changed.emit()
 
 

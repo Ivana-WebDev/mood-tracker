@@ -47,7 +47,7 @@ func load_profile() -> void:
 	var data = _read(PROFILE_PATH)
 	if typeof(data) == TYPE_DICTIONARY:
 		profile = _fix_numbers(data)
-	var defaults := {"runs": 0, "wins": 0, "best_floor": 0, "wins_by_char": {}, "fast_combat": false, "screen_shake": true, "fullscreen": false}
+	var defaults := {"runs": 0, "wins": 0, "best_floor": 0, "wins_by_char": {}, "fast_combat": false, "screen_shake": true, "fullscreen": false, "music_on": true, "sfx_on": true}
 	for k in defaults:
 		if not profile.has(k):
 			profile[k] = defaults[k]
