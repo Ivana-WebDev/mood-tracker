@@ -9,6 +9,8 @@ var _gold: Label
 var _floor: Label
 var _relics: HBoxContainer
 var _deck_btn: Button
+var _map_btn: Button
+var _potions: HBoxContainer
 var hp_override := Vector2i(-1, -1)
 
 
@@ -33,6 +35,8 @@ func _ready() -> void:
 	_gold = _stat(row, "coin", Palette.GOLD)
 	_floor = UI.label("", 18, Palette.TEXT_DIM)
 	row.add_child(_floor)
+	_potions = UI.hbox(4, BoxContainer.ALIGNMENT_BEGIN)
+	row.add_child(_potions)
 	_relics = UI.hbox(6, BoxContainer.ALIGNMENT_BEGIN)
 	var rs := ScrollContainer.new()
 	rs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -40,6 +44,8 @@ func _ready() -> void:
 	rs.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	rs.add_child(_relics)
 	row.add_child(rs)
+	_map_btn = UI.button("Map", _show_map, Vector2(84, 46), 18)
+	row.add_child(_map_btn)
 	_deck_btn = UI.button("Deck", _show_deck, Vector2(110, 46), 18)
 	row.add_child(_deck_btn)
 	row.add_child(UI.button("Menu", _open_menu, Vector2(96, 46), 18))
@@ -72,10 +78,21 @@ func refresh() -> void:
 	_gold.text = str(run["gold"])
 	_floor.text = "Act %d  ·  Floor %d" % [int(run["act"]), int(run["floor"])]
 	_deck_btn.text = "Deck %d" % run["deck"].size()
+	for c in _potions.get_children():
+		c.queue_free()
+	var pots: Array = run.get("potions", [])
+	for i in PotionDatabase.MAX_SLOTS:
+		_potions.add_child(PotionIcon.new(i, pots[i] if i < pots.size() else "", 40))
+	var on_map: bool = get_parent() is Screen and get_parent().screen_name == "map"
+	_map_btn.visible = not on_map
 	for c in _relics.get_children():
 		c.queue_free()
 	for id in run["relics"]:
 		_relics.add_child(RelicIcon.new(id, 42))
+
+
+func _show_map() -> void:
+	Overlay.open(self, MapOverlay.new())
 
 
 func _show_deck() -> void:

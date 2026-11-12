@@ -49,6 +49,9 @@ func _ready() -> void:
 	for e in scr.cm.alive_enemies():
 		scr.cm.lose_hp(e, 999)
 	await _wait(1.8)
+	GameManager.run["pending"]["potion"] = "swift_elixir"
+	main.current._build()
+	await _frames(4)
 	await _shot("07_reward")
 	main.current._pick_card()
 	await _frames(8)
@@ -68,6 +71,7 @@ func _ready() -> void:
 	main.close_top_overlay()
 	GameManager.run["gold"] = 400
 	GameManager.set_pending({"type": "shop", "stock": GameManager._make_shop_stock()})
+	GameManager.add_potion("fire_flask")
 	GameManager.goto("shop")
 	await _frames(10)
 	await _shot("11_shop")

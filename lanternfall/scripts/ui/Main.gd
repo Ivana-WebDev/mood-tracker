@@ -40,12 +40,15 @@ func _ready() -> void:
 	overlay_layer.name = "Overlays"
 	overlay_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Hand cards, FX and the targeting arrow use z_index up to ~70; keep every overlay above them.
+	overlay_layer.z_index = 200
 	add_child(overlay_layer)
 	_build_tooltip()
 	_toast_box = UI.vbox(8)
-	_toast_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_toast_box.position.y = 80
+	_toast_box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_toast_box.offset_top = 80
 	_toast_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toast_box.z_index = 300
 	add_child(_toast_box)
 	GameManager.screen_requested.connect(_on_screen_requested)
 	get_tree().set_auto_accept_quit(false)
@@ -123,7 +126,7 @@ func _build_tooltip() -> void:
 	v.add_child(b)
 	_tooltip.add_child(v)
 	_tooltip.visible = false
-	_tooltip.z_index = 100
+	_tooltip.z_index = 300
 	add_child(_tooltip)
 
 
@@ -159,8 +162,8 @@ func show_toast(text: String, color: Color = Palette.TEXT) -> void:
 	var p := UI.panel(Palette.BG_2, 12, color)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(UI.label(text, 20, color, HORIZONTAL_ALIGNMENT_CENTER))
+	p.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_toast_box.add_child(p)
-	_toast_box.position.x = (get_viewport_rect().size.x - _toast_box.size.x) / 2.0
 	var tw := p.create_tween()
 	tw.tween_interval(1.6)
 	tw.tween_property(p, "modulate:a", 0.0, 0.4)

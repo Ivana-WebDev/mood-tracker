@@ -16,6 +16,7 @@ signal gadgets_changed
 signal gadget_fired(index: int)
 signal dice_changed
 signal flow_broken
+signal potion_used(id: String)
 
 const MAX_GADGETS := 3
 const MAX_DICE := 8
@@ -233,6 +234,9 @@ func start_player_turn() -> void:
 		deploy_gadget("turret", 2, 2)
 	draw_cards(BASE_DRAW + RelicManager.bonus_draw())
 	RelicManager.on_turn_start(self)
+	# Turn-start effects (e.g. a pushed-out gadget firing) can end the fight.
+	if phase == "over":
+		return
 	phase = "player"
 	turn_started.emit(turn)
 	hand_changed.emit()
@@ -392,6 +396,9 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 				hand_changed.emit()
 			"double_block":
 				gain_block(player, player.block)
+			"potion_damage":
+				for t in _targets(tk, target):
+					_gadget_hit(t, int(e["value"]))
 			"burst":
 				var raw: int = int(e["base"]) + int(e["per"]) * player.get_status(e["status"])
 				player.set_status(e["status"], 0)
@@ -453,6 +460,36 @@ func _resolve_card(c: Dictionary, target: Combatant) -> void:
 				while not dice.is_empty():
 					total += spend_die("high")
 				attack(player, target, total * int(e["mult"]) + int(e.get("base", 0)))
+
+
+# ------------------------------------------------------------------ potions
+
+func potion_needs_target(index: int) -> bool:
+	var pots: Array = GameManager.run.get("potions", [])
+	return index < pots.size() and PotionDatabase.get_potion(pots[index])["target"] == "enemy"
+
+
+## Drinks the potion in slot `index`. Returns false if it can't be used right now.
+func use_potion(index: int, target: Combatant = null) -> bool:
+	var pots: Array = GameManager.run.get("potions", [])
+	if phase != "player" or index < 0 or index >= pots.size():
+		return false
+	var id: String = pots[index]
+	var p := PotionDatabase.get_potion(id)
+	if p["target"] == "enemy" and (target == null or not target.is_alive()):
+		var alive := alive_enemies()
+		if alive.size() != 1:
+			return false
+		target = alive[0]
+	pots.remove_at(index)
+	floating_text.emit(player, p["name"], Color(p["color"]))
+	_resolve_card({"type": "potion", "target": p["target"], "effects": p["effects"]}, target)
+	GameManager.run["stats"]["potions"] = int(GameManager.run["stats"].get("potions", 0)) + 1
+	potion_used.emit(id)
+	GameManager.run_changed.emit()
+	hand_changed.emit()
+	state_changed.emit()
+	return true
 
 
 # ------------------------------------------------------------------ hero mechanics

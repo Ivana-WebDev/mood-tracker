@@ -36,7 +36,7 @@ func new_run(character_id: String, run_seed: int = 0) -> void:
 		"deck": [], "relics": [], "relic_flags": {},
 		"act": 1, "floor": 0, "map": {}, "current_node": -1,
 		"next_uid": 1, "remove_cost": 75, "fights": 0, "last_encounter": "",
-		"seen_events": [],
+		"seen_events": [], "potions": [],
 		"stats": {"floors": 0, "kills": 0, "elites": 0, "bosses": 0, "gold_earned": 0, "cards_played": 0},
 		"pending": {},
 	}
@@ -180,6 +180,9 @@ func on_combat_won(kind: String, hp_left: int) -> void:
 	gold = int(round(gold * RelicManager.gold_multiplier()))
 	var reward := {"type": "reward", "kind": kind, "gold": gold, "gold_taken": false,
 		"cards": roll_card_rewards(kind), "card_taken": false, "relic": "", "relic_taken": false, "boss_relics": []}
+	var potion_chance: float = {"monster": 0.4, "elite": 0.6, "boss": 1.0}.get(kind, 0.4)
+	reward["potion"] = roll_potion() if rng.randf() < potion_chance else ""
+	reward["potion_taken"] = false
 	if kind == "elite":
 		reward["relic"] = RelicManager.roll_relic(_roll_relic_rarity())
 		run["stats"]["elites"] = int(run["stats"]["elites"]) + 1
@@ -305,7 +308,62 @@ func _make_shop_stock() -> Dictionary:
 		if r != "":
 			taken.append(r)
 			relics.append({"id": r, "price": relic_price(RelicDatabase.get_relic(r)["rarity"]), "sold": false})
-	return {"cards": cards, "relics": relics, "removed": false}
+	var potions: Array = []
+	for i in 3:
+		var pid := roll_potion()
+		potions.append({"id": pid, "price": int(round(PotionDatabase.price(PotionDatabase.get_potion(pid)["rarity"]) * rng.randf_range(0.9, 1.1) * RelicManager.price_multiplier())), "sold": false})
+	return {"cards": cards, "relics": relics, "potions": potions, "removed": false}
+
+
+# ------------------------------------------------------------------ potions
+
+func potions() -> Array:
+	if not run.has("potions"):
+		run["potions"] = []
+	return run["potions"]
+
+
+func potion_slots_free() -> bool:
+	return potions().size() < PotionDatabase.MAX_SLOTS
+
+
+func roll_potion() -> String:
+	var rarity := _weighted({"common": 64, "uncommon": 29, "rare": 7})
+	var pool := PotionDatabase.pool(run.get("character", ""), rarity)
+	if pool.is_empty():
+		pool = PotionDatabase.pool(run.get("character", ""), "common")
+	return pool[rng.randi_range(0, pool.size() - 1)]
+
+
+func add_potion(id: String) -> bool:
+	if id == "" or not potion_slots_free():
+		return false
+	potions().append(id)
+	run_changed.emit()
+	return true
+
+
+func discard_potion(index: int) -> void:
+	if index >= 0 and index < potions().size():
+		potions().remove_at(index)
+		SaveManager.save_run()
+		run_changed.emit()
+
+
+## Outside combat only potions flagged "anywhere" (healing) can be drunk.
+func use_potion_outside_combat(index: int) -> bool:
+	if index < 0 or index >= potions().size():
+		return false
+	var p := PotionDatabase.get_potion(potions()[index])
+	if not p.get("anywhere", false):
+		return false
+	for e in p["effects"]:
+		if e["type"] == "heal":
+			change_hp(int(e["value"]))
+	potions().remove_at(index)
+	SaveManager.save_run()
+	run_changed.emit()
+	return true
 
 
 # ------------------------------------------------------------------ deck + stats mutations

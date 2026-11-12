@@ -22,6 +22,12 @@ func _init() -> void:
 	content.offset_right = -24
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(content)
+	# Panels and buttons placed directly in the column keep their natural width instead of
+	# stretching edge to edge (anything that set EXPAND explicitly is left alone).
+	content.child_entered_tree.connect(func(n):
+		if (n is PanelContainer or n is Button) and n.size_flags_horizontal == Control.SIZE_FILL:
+			n.size_flags_horizontal = Control.SIZE_SHRINK_CENTER)
+
 
 
 func _ready() -> void:

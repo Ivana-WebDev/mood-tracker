@@ -37,6 +37,12 @@ func _build() -> void:
 		_list.add_child(_row("Take %d Gold" % int(p["gold"]), Palette.GOLD, _take_gold))
 	if not p.get("card_taken", false) and not p.get("cards", []).is_empty():
 		_list.add_child(_row("Add a card to your deck", Palette.SKILL, _pick_card))
+	if not p.get("potion_taken", false) and p.get("potion", "") != "":
+		var pd := PotionDatabase.get_potion(p["potion"])
+		var full := not GameManager.potion_slots_free()
+		var b := _row("Potion: %s%s" % [pd["name"], "  (slots full)" if full else ""], Color(pd["color"]), _take_potion)
+		b.disabled = full
+		_list.add_child(b)
 	if not p.get("relic_taken", false) and p.get("relic", "") != "":
 		var r: Dictionary = RelicDatabase.get_relic(p["relic"])
 		_list.add_child(_row("Relic: %s" % r["name"], Color(r["color"]), _take_relic))
@@ -55,6 +61,15 @@ func _take_gold() -> void:
 	GameManager.add_gold(int(p["gold"]))
 	p["gold_taken"] = true
 	SaveManager.save_run()
+	_build()
+
+
+func _take_potion() -> void:
+	var p := _p()
+	if GameManager.add_potion(p["potion"]):
+		p["potion_taken"] = true
+		SaveManager.save_run()
+		UI.toast(self, "Obtained %s" % PotionDatabase.get_potion(p["potion"])["name"], Palette.GOOD)
 	_build()
 
 

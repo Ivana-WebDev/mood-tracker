@@ -66,6 +66,7 @@ class MapView extends Control:
 	var _dragged := false
 	var _t := 0.0
 	var _velocity := 0.0
+	var read_only := false
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_STOP
@@ -202,6 +203,8 @@ class MapView extends Control:
 				_velocity = -event.relative.x * 30.0
 
 	func _tap(pos: Vector2) -> void:
+		if read_only:
+			return
 		var run := GameManager.run
 		var avail: Array = MapManager.available_nodes(run)
 		for nid in avail:

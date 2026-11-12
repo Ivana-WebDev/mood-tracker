@@ -100,6 +100,36 @@ func _build() -> void:
 	rp.add_child(rv)
 	bottom.add_child(rp)
 	_root.add_child(bottom)
+	var prow := UI.hbox(18)
+	prow.mouse_filter = Control.MOUSE_FILTER_PASS
+	prow.add_child(UI.label("Potions", 22, Palette.GOLD))
+	for i in stock.get("potions", []).size():
+		var it: Dictionary = stock["potions"][i]
+		var pd := PotionDatabase.get_potion(it["id"])
+		var pp := UI.panel(Palette.PANEL, 14, Color(pd["color"]))
+		pp.custom_minimum_size = Vector2(250, 0)
+		var pv := UI.vbox(6)
+		var top2 := UI.hbox(8)
+		var pic := PotionIcon.new(-1, it["id"], 44)
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		top2.add_child(pic)
+		top2.add_child(UI.label(pd["name"], 18, Palette.TEXT))
+		pv.add_child(top2)
+		var pdesc := UI.wrap_label(pd["desc"], 14, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_LEFT)
+		pdesc.custom_minimum_size = Vector2(210, 0)
+		pv.add_child(pdesc)
+		if it["sold"]:
+			pv.add_child(UI.label("SOLD", 18, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
+		else:
+			var pb := UI.accent_button("Buy %d g" % int(it["price"]), _buy_potion.bind(i), Palette.GOLD, Vector2(200, 46))
+			pb.disabled = int(GameManager.run["gold"]) < int(it["price"]) or not GameManager.potion_slots_free()
+			pv.add_child(pb)
+		pp.add_child(pv)
+		prow.add_child(pp)
+	if not stock.get("potions", []).is_empty():
+		_root.add_child(prow)
+		if not GameManager.potion_slots_free():
+			_root.add_child(UI.label("Your potion slots are full. Drink or discard one from the top bar to buy more.", 15, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
 
 
 func _buy_card(i: int) -> void:
@@ -124,6 +154,17 @@ func _buy_relic(i: int) -> void:
 	GameManager.add_gold(-int(r["price"]))
 	RelicManager.add_relic(r["id"])
 	r["sold"] = true
+	SaveManager.save_run()
+	_build()
+
+
+func _buy_potion(i: int) -> void:
+	var it: Dictionary = _stock()["potions"][i]
+	if it["sold"] or int(GameManager.run["gold"]) < int(it["price"]) or not GameManager.potion_slots_free():
+		return
+	GameManager.add_gold(-int(it["price"]))
+	GameManager.add_potion(it["id"])
+	it["sold"] = true
 	SaveManager.save_run()
 	_build()
 

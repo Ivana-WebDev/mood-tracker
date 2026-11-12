@@ -24,6 +24,7 @@ var hint: Label
 var _ended := false
 var mech_hud: MechanicHUD
 var hovered: CardView = null
+var pending_potion: int = -1
 var _mouse_hover := not DisplayServer.is_touchscreen_available()
 var _float_stack: Dictionary = {} # view -> [last_time, count]
 
@@ -376,7 +377,29 @@ func _set_hovered(e: CombatantView) -> void:
 		e.targeted = true
 
 
+## Called by the potion menu. Targeted potions wait for an enemy tap when several are alive.
+func try_use_potion(index: int) -> void:
+	if cm.phase != "player" or _ended:
+		UI.toast(self, "Wait for your turn", Palette.BAD)
+		return
+	selected = null
+	if cm.potion_needs_target(index) and cm.alive_enemies().size() > 1:
+		pending_potion = index
+		for v in enemy_views:
+			v.targetable = v.c.is_alive()
+		UI.toast(self, "Choose a target for the potion", Palette.GOLD)
+		return
+	cm.use_potion(index)
+
+
 func _on_combatant_tapped(view: CombatantView) -> void:
+	if pending_potion >= 0:
+		var idx := pending_potion
+		pending_potion = -1
+		if not view.c.is_player and view.c.is_alive():
+			cm.use_potion(idx, view.c)
+		_refresh()
+		return
 	if selected != null and not view.c.is_player and view.c.is_alive() and cm.needs_target(selected.inst):
 		var s := selected
 		selected = null
@@ -417,7 +440,7 @@ func _refresh() -> void:
 	end_btn.disabled = cm.phase != "player"
 	if top_bar:
 		top_bar.set_hp(maxi(0, cm.player.hp), cm.player.max_hp)
-	var target_mode := selected != null and cm.needs_target(selected.inst)
+	var target_mode := (selected != null and cm.needs_target(selected.inst)) or pending_potion >= 0
 	for v in enemy_views:
 		v.targetable = target_mode and v.c.is_alive()
 	for uid in card_views:

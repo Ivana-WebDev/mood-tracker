@@ -5,6 +5,8 @@ extends Node
 const RUNS_PER_HERO := 12
 
 var results := {}
+var _potions_total := 0
+var failures_logic := 0
 
 
 func _ready() -> void:
@@ -28,6 +30,8 @@ func _ready() -> void:
 		avg /= fl.size()
 		print("%-9s wins %d/%d  avg floor %.1f  acts %s" % [ch, results[ch]["wins"], RUNS_PER_HERO, avg, str(results[ch]["acts"])])
 	_test_save_roundtrip()
+	print("potions drunk across all runs: %d" % _potions_total)
+	failures += failures_logic
 	print("AUTOPLAY DONE failures=%d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -145,6 +149,8 @@ func _claim_rewards() -> void:
 		var cards: Array = p["cards"].duplicate()
 		cards.sort_custom(func(a, b): return order.get(CardDatabase.CARDS[a["id"]]["rarity"], 3) < order.get(CardDatabase.CARDS[b["id"]]["rarity"], 3))
 		GameManager.add_card(cards[0]["id"], cards[0]["upgraded"])
+	if p.get("potion", "") != "":
+		GameManager.add_potion(p["potion"])
 	if p["relic"] != "":
 		RelicManager.add_relic(p["relic"])
 	if not p["boss_relics"].is_empty():
@@ -160,6 +166,12 @@ func _fight(p: Dictionary) -> bool:
 	var turns := 0
 	while cm.phase != "over" and turns < 60:
 		turns += 1
+		# Drink potions in hard fights or when low.
+		if cm.phase == "player" and (p["kind"] != "monster" or cm.player.hp < cm.player.max_hp * 0.4):
+			while not GameManager.potions().is_empty() and cm.phase == "player":
+				var alive := cm.alive_enemies()
+				if not cm.use_potion(0, alive[0] if not alive.is_empty() else null):
+					GameManager.discard_potion(0)
 		var safety := 0
 		while cm.phase == "player" and safety < 40:
 			safety += 1
@@ -171,6 +183,10 @@ func _fight(p: Dictionary) -> bool:
 					var target: Combatant = null
 					if cm.needs_target(c):
 						var alive := cm.alive_enemies()
+						if alive.is_empty():
+							failures_logic += 1
+							print("ERROR: all enemies dead but combat still in player phase")
+							break
 						alive.sort_custom(func(x, y): return x.hp < y.hp)
 						target = alive[0]
 					if cm.play_card(c, target):
@@ -180,6 +196,8 @@ func _fight(p: Dictionary) -> bool:
 				break
 		if cm.phase == "player":
 			await cm.end_player_turn()
+	_potions_total += int(GameManager.run["stats"].get("potions", 0))
+	GameManager.run["stats"]["potions"] = 0
 	var won := cm.phase == "over" and cm.player.hp > 0
 	if won:
 		GameManager.on_combat_won(p["kind"], cm.player.hp)

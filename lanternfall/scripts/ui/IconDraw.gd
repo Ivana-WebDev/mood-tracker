@@ -123,6 +123,13 @@ static func icon(ci: CanvasItem, kind: String, c: Vector2, s: float, color: Colo
 			ci.draw_circle(c + Vector2(-0.35, 0.45) * s, 0.35 * s, color.darkened(0.35))
 			poly(ci, [[-0.6, 0.0], [0.9, -0.55], [1.0, -0.2], [-0.5, 0.4]], c, s, color)
 			ci.draw_circle(c + Vector2(-0.35, 0.45) * s, 0.14 * s, color.lightened(0.3))
+		"potion":
+			potion(ci, c, s, color)
+		"map":
+			poly(ci, [[-0.85, -0.6], [-0.3, -0.8], [0.3, -0.6], [0.85, -0.8], [0.85, 0.6], [0.3, 0.8], [-0.3, 0.6], [-0.85, 0.8]], c, s, color)
+			line(ci, [-0.3, -0.8], [-0.3, 0.6], c, s, color.darkened(0.45), 0.08)
+			line(ci, [0.3, -0.6], [0.3, 0.8], c, s, color.darkened(0.45), 0.08)
+			ci.draw_circle(c + Vector2(0.55, -0.1) * s, 0.14 * s, Palette.BAD)
 		"cards":
 			for i in 3:
 				var off := Vector2((i - 1) * 0.32, absf(i - 1) * 0.08) * s
@@ -130,6 +137,28 @@ static func icon(ci: CanvasItem, kind: String, c: Vector2, s: float, color: Colo
 				poly(ci, [[-0.32, -0.6], [0.32, -0.6], [0.32, 0.6], [-0.32, 0.6]], c + off, s, col)
 		_:
 			ci.draw_circle(c, 0.6 * s, color)
+
+
+## A round-bottomed flask with coloured liquid, cork and highlight. s = half height.
+static func potion(ci: CanvasItem, c: Vector2, s: float, liquid: Color) -> void:
+	var glass := Color(0.85, 0.9, 1.0, 0.28)
+	var body_c := c + Vector2(0, 0.28) * s
+	var r := 0.6 * s
+	ci.draw_circle(body_c, r + 2.0, Color(0.03, 0.035, 0.06, 0.92))
+	ci.draw_rect(Rect2(c + Vector2(-0.24, -0.72) * s - Vector2(2, 0), Vector2(0.48 * s + 4, 0.6 * s)), Color(0.03, 0.035, 0.06, 0.92))
+	ci.draw_circle(body_c, r, glass)
+	ci.draw_rect(Rect2(c + Vector2(-0.22, -0.72) * s, Vector2(0.44 * s, 0.62 * s)), glass)
+	# liquid: lower part of the bulb
+	var liq := PackedVector2Array()
+	for i in 17:
+		var a := -0.25 + i * (PI + 0.5) / 16.0
+		liq.append(body_c + Vector2(cos(a), sin(a)) * r * 0.9)
+	ci.draw_colored_polygon(liq, liquid)
+	ci.draw_line(liq[0], liq[liq.size() - 1], liquid.lightened(0.4), maxf(1.0, s * 0.06))
+	ci.draw_circle(body_c + Vector2(0.15, 0.25) * s, 0.08 * s, Color(1, 1, 1, 0.35))
+	# cork + highlight
+	ci.draw_rect(Rect2(c + Vector2(-0.2, -0.95) * s, Vector2(0.4 * s, 0.26 * s)), Color("a07850"))
+	ci.draw_line(body_c + Vector2(-0.35, -0.25) * s, body_c + Vector2(-0.3, 0.15) * s, Color(1, 1, 1, 0.55), maxf(1.0, s * 0.08), true)
 
 
 # ====================================================================== shaded shape kit
