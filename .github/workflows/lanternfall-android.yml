@@ -3,6 +3,9 @@ name: Lanternfall – Android APK + PC builds
 on:
   workflow_dispatch:
   push:
+    branches: ["**"]
+    # Pushing a tag like lanternfall-classic-v1 also publishes a permanent GitHub Release (job "release").
+    tags: ["lanternfall-*"]
     paths:
       - "lanternfall/**"
       - ".github/workflows/lanternfall-android.yml"
@@ -120,3 +123,37 @@ jobs:
           name: Lanternfall-macos
           path: build/macos/Lanternfall.zip
           if-no-files-found: error
+
+  # Runs only for version tags (e.g. lanternfall-classic-v1): attaches every build to a permanent
+  # GitHub Release. Workflow artifacts expire after 90 days; release files do not.
+  release:
+    name: Publish GitHub Release
+    needs: [android, desktop]
+    if: startsWith(github.ref, 'refs/tags/lanternfall-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Package downloads
+        run: |
+          mkdir -p out
+          cp dist/Lanternfall-android/Lanternfall-debug.apk "out/Lanternfall-${GITHUB_REF_NAME}-android.apk"
+          (cd dist/Lanternfall-windows && zip -9 "../../out/Lanternfall-${GITHUB_REF_NAME}-windows.zip" Lanternfall.exe)
+          chmod +x dist/Lanternfall-linux/Lanternfall.x86_64
+          tar -czf "out/Lanternfall-${GITHUB_REF_NAME}-linux.tar.gz" -C dist/Lanternfall-linux Lanternfall.x86_64
+          cp dist/Lanternfall-macos/Lanternfall.zip "out/Lanternfall-${GITHUB_REF_NAME}-macos.zip"
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: out/*
+          body: |
+            Permanent builds of Lanternfall at `${{ github.ref_name }}`.
+
+            - **Android:** `*-android.apk`. Copy it to your phone and open it (allow "install unknown apps" if asked).
+            - **Windows:** `*-windows.zip`. Unzip it and run `Lanternfall.exe` (SmartScreen: More info, then Run anyway).
+            - **macOS:** `*-macos.zip`. Unzip it, then right-click `Lanternfall.app` and choose Open the first time.
+            - **Linux:** `*-linux.tar.gz`. Extract it and run `./Lanternfall.x86_64`.

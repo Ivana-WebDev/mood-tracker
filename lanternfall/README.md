@@ -109,6 +109,7 @@ adb install -r build/Lanternfall-debug.apk
 
 ### Option C: GitHub Actions (no local setup)
 `.github/workflows/lanternfall-android.yml` runs the headless tests, then exports a signed **debug APK** and uploads it as the `Lanternfall-android` build artifact. It runs on every push that touches `lanternfall/`, and you can also start it manually (*Actions → Lanternfall – Android APK → Run workflow*).
+**Permanent releases:** pushing a tag that starts with `lanternfall-` (for example `lanternfall-classic-v1`) also publishes a GitHub Release with the Android, Windows, macOS and Linux downloads attached. Workflow artifacts expire after 90 days, but release files stay.
 For a **release** APK, add these repository secrets: `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_USER` and `ANDROID_RELEASE_KEYSTORE_PASSWORD`.
 
 **Preset notes:** the preset uses the standard (non-Gradle) template, so no Android build template has to be installed. Package name is `com.lanternfall.deckbuilder` and min SDK is Godot's default (21). It renders with the **Compatibility (GLES3)** renderer so it runs on the widest range of devices. Orientation is **sensor landscape** (`orientation=4`): always landscape, and it rotates between the two landscape directions.
