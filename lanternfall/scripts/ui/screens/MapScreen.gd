@@ -135,6 +135,8 @@ class MapView extends Control:
 				if taken:
 					draw_line(a, b, Color(Palette.GOLD, 0.18), 9.0, true)
 				_dashed(a, b, col, 3.0 if taken else 2.0)
+				if n["id"] == cur and avail.has(nid):
+					_flow(a, b)
 		# Nodes
 		for n in nodes:
 			var p := node_pos(n)
@@ -156,16 +158,51 @@ class MapView extends Control:
 			draw_circle(p + Vector2(-r * 0.15, -r * 0.2), r * 0.75, fill.lightened(0.07))
 			var ring := col if (is_avail or n["visited"]) else Color(col, 0.45)
 			draw_arc(p, r, 0, TAU, 40, ring, 3.0, true)
+			# Studded rim.
+			var studs := 12 if t == "boss" else 8
+			for k in studs:
+				var a3 := k * TAU / studs + (_t * 0.4 if is_avail else 0.0)
+				var sp := p + Vector2(cos(a3), sin(a3)) * (r + 1.0)
+				draw_circle(sp, 2.6 if t == "boss" else 1.9, IconDraw.OUTLINE)
+				draw_circle(sp, 1.7 if t == "boss" else 1.2, ring.lightened(0.3))
+			if t == "boss":
+				for k in 10:
+					var a4 := k * TAU / 10.0 + sin(_t) * 0.05
+					var tip := p + Vector2(cos(a4), sin(a4)) * (r + 16.0 + 3.0 * sin(_t * 3.0 + k))
+					draw_colored_polygon(PackedVector2Array([p + Vector2(cos(a4 - 0.12), sin(a4 - 0.12)) * (r + 3), tip, p + Vector2(cos(a4 + 0.12), sin(a4 + 0.12)) * (r + 3)]), Color(col, 0.75))
 			if n["id"] == cur:
 				draw_arc(p, r + 6, 0, TAU, 40, Palette.TEXT, 2.0, true)
 			var icol := col if (is_avail or n["visited"] or t == "boss") else Color(col, 0.55)
-			IconDraw.icon(self, t, p, r * 0.6, icol)
+			var ip := p + (Vector2(0, sin(_t * 3.0 + p.x) * 2.0) if is_avail else Vector2.ZERO)
+			IconDraw.icon(self, t, ip + Vector2(1, 2), r * 0.6, Color(0, 0, 0, 0.45))
+			IconDraw.icon(self, t, ip, r * 0.6, icol)
+			if n["visited"] and n["id"] != cur:
+				draw_circle(p + Vector2(r * 0.7, -r * 0.7), 7, IconDraw.OUTLINE)
+				draw_circle(p + Vector2(r * 0.7, -r * 0.7), 5.5, Palette.GOLD)
+		# The hero token stands on the current node (or before the first floor).
+		var ch: Dictionary = CharacterDatabase.get_character(run["character"])
+		var hp_pos := Vector2(MapScreenConst.MX - MapScreenConst.FS * 0.42 - scroll_x, size.y * 0.5 - 40)
+		if cur >= 0:
+			hp_pos = node_pos(nodes[cur]) + Vector2(0, -MapScreenConst.R - 26)
+		if hp_pos.x > -40 and hp_pos.x < size.x + 40:
+			IconDraw.creature(self, ch["shape"], hp_pos, 20, Color(ch["color"]), _t, 1.0)
 		# Fade edges to hint at scrolling.
 		var w := 40.0
 		for i in 8:
 			var a2 := 0.5 * (1.0 - i / 8.0)
 			draw_rect(Rect2(i * w / 8.0, 0, w / 8.0, size.y), Color(Palette.BG, a2))
 			draw_rect(Rect2(size.x - (i + 1) * w / 8.0, 0, w / 8.0, size.y), Color(Palette.BG, a2))
+
+	## Lantern light flowing toward the nodes you can travel to next.
+	func _flow(a: Vector2, b: Vector2) -> void:
+		var d := a.distance_to(b)
+		var dir := (b - a) / maxf(d, 0.001)
+		for k in 3:
+			var u := fmod(_t * 0.6 + k / 3.0, 1.0)
+			var q := a + dir * lerpf(MapScreenConst.R, d - MapScreenConst.R, u)
+			var al := sin(u * PI)
+			draw_circle(q, 9.0, Color(Palette.GOLD, 0.12 * al))
+			draw_circle(q, 3.5, Color("fff1c8", 0.9 * al))
 
 	func _dashed(a: Vector2, b: Vector2, col: Color, w: float) -> void:
 		var d := a.distance_to(b)

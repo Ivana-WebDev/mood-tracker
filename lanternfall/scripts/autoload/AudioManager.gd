@@ -91,6 +91,9 @@ func play(name: String, volume_db: float = 0.0, pitch_jitter: float = 0.06) -> v
 	p.play()
 
 
+var _xfade: Tween = null
+
+
 func play_music(name: String) -> void:
 	if name == _current_music:
 		return
@@ -112,7 +115,11 @@ func play_music(name: String) -> void:
 	incoming.stream = stream
 	incoming.volume_db = -40.0
 	incoming.play()
+	# A crossfade still running from a quick earlier screen change must not stop the new track.
+	if _xfade != null and _xfade.is_valid():
+		_xfade.kill()
 	var tw := create_tween().set_parallel(true)
+	_xfade = tw
 	tw.tween_property(incoming, "volume_db", _music_target_db(), 1.2)
 	if outgoing.playing:
 		tw.tween_property(outgoing, "volume_db", -60.0, 1.0)

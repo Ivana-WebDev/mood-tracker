@@ -676,29 +676,58 @@ static func _hollow_king(ci: CanvasItem, c: Vector2, s: float, col: Color, t: fl
 
 static func _wyrm(ci: CanvasItem, c: Vector2, s: float, col: Color, t: float) -> void:
 	var scale_col := col.darkened(0.15)
-	# wings
 	var flap := sin(t * 1.6) * 0.12
-	shape(ci, [[0.1, -0.35], [0.95, -1.15 + flap], [1.05, -0.55 + flap], [0.8, -0.6 + flap], [0.85, -0.2 + flap * 0.5], [0.45, -0.1]], c, s, col.darkened(0.4))
-	# coiled body (segments from tail to neck)
+	# Far wing (behind the body).
+	shape(ci, [[-0.05, -0.4], [-0.55, -1.2 + flap * 0.7], [-0.45, -0.75], [-0.75, -0.8 + flap * 0.5], [-0.35, -0.2]], c, s, col.darkened(0.6))
+	# Near wing with membrane ribs.
+	var wing: Array = [[0.1, -0.35], [0.95, -1.15 + flap], [1.15, -0.85 + flap], [1.05, -0.55 + flap], [0.85, -0.6 + flap], [0.88, -0.25 + flap * 0.5], [0.6, -0.3], [0.45, -0.1]]
+	shape(ci, wing, c, s, col.darkened(0.4))
+	for k in 3:
+		ci.draw_line(P2(c, s, 0.15, -0.32), P2(c, s, 0.95 + k * 0.07, -1.1 + k * 0.25 + flap), Color(col.darkened(0.65), 0.9), maxf(1.0, s * 0.025), true)
+	# Coiled body (segments from tail to neck).
 	var segs: Array = []
-	for i in 9:
-		var u := float(i) / 8.0
-		segs.append(c + Vector2(0.75 - u * 1.2 + sin(u * 4.0 + t) * 0.06, 0.75 - u * 1.25 + cos(u * 3.0) * 0.12) * s)
+	for i in 10:
+		var u := float(i) / 9.0
+		segs.append(c + Vector2(0.75 - u * 1.2 + sin(u * 4.0 + t) * 0.06, 0.78 - u * 1.3 + cos(u * 3.0) * 0.12) * s)
+	# Tail flame.
+	var tail: Vector2 = segs[0] + Vector2(0.18, 0.12) * s
+	glow(ci, tail, s * 0.2, Color("ffcf4a"), 3)
+	shape(ci, [[-0.08, 0.0], [0.05 + sin(t * 8.0) * 0.03, -0.32], [0.12, 0.02], [0.0, 0.1]], tail, s, Color("ffb347"), false)
 	for i in segs.size():
-		var r := s * (0.2 + 0.18 * sin(float(i) / segs.size() * PI))
-		ball(ci, segs[i], r, scale_col, maxf(1.5, s * 0.03))
-		ci.draw_circle(segs[i] + Vector2(0, r * 0.4), r * 0.45, Color("f2c96b", 0.55))
-	# lantern glow in chest
+		var r := s * (0.17 + 0.2 * sin(float(i) / segs.size() * PI))
+		ball(ci, segs[i], r, scale_col if i % 2 == 0 else scale_col.darkened(0.1), maxf(1.5, s * 0.03))
+		# Belly plate + dorsal spike.
+		oval(ci, segs[i] + Vector2(-r * 0.1, r * 0.45), r * 0.55, r * 0.3, Color("f2c96b", 0.75), 0.0)
+		ci.draw_arc(segs[i], r * 0.7, PI * 1.1, PI * 1.6, 8, Color(1, 1, 1, 0.18), maxf(1.0, s * 0.02), true)
+		if i > 0 and i < segs.size() - 1:
+			var sp: Vector2 = segs[i] + Vector2(r * 0.35, -r * 0.85)
+			ci.draw_colored_polygon(PackedVector2Array([sp + Vector2(-r * 0.3, r * 0.2), sp + Vector2(r * 0.25, -r * 0.45), sp + Vector2(r * 0.3, r * 0.25)]), Color("f6e7c8"))
+	# Caged lantern glowing in the chest.
 	var chest: Vector2 = segs[5]
-	glow(ci, chest, s * 0.35 * (0.9 + 0.1 * sin(t * 4.0)), Color("ffcf4a"), 5)
-	# head
-	var hp: Vector2 = segs[8] + Vector2(-0.18, -0.12) * s
-	shape(ci, [[0.15, -0.2], [-0.25, -0.22], [-0.55, -0.05], [-0.25, 0.08], [0.15, 0.18]], hp, s, col)
-	shape(ci, [[-0.2, 0.05], [-0.5, 0.0 + sin(t * 2.0) * 0.04], [-0.2, 0.18]], hp, s, col.darkened(0.25))
-	shape(ci, [[0.02, -0.2], [0.2, -0.55], [0.12, -0.18]], hp, s, Color("f6e7c8"))
-	shape(ci, [[-0.1, -0.2], [0.0, -0.48], [-0.02, -0.18]], hp, s, Color("f6e7c8"))
+	var lf := 0.9 + 0.1 * sin(t * 4.0)
+	glow(ci, chest, s * 0.38 * lf, Color("ffcf4a"), 5)
+	ci.draw_circle(chest, s * 0.11 * lf, Color("fff1b0"))
+	for k in 3:
+		var bx := (k - 1) * 0.08
+		ci.draw_line(chest + Vector2(bx, -0.14) * s, chest + Vector2(bx, 0.14) * s, Color(col.darkened(0.6), 0.9), maxf(1.0, s * 0.025))
+	# Head with horns, jaw and teeth.
+	var hp: Vector2 = segs[9] + Vector2(-0.18, -0.12) * s
+	var jaw := sin(t * 2.0) * 0.05
+	shape(ci, [[-0.2, 0.05], [-0.55, 0.02 + jaw], [-0.2, 0.2]], hp, s, col.darkened(0.25))
+	for k in 3:
+		var tx := -0.25 - k * 0.09
+		ci.draw_colored_polygon(PackedVector2Array([hp + Vector2(tx, 0.05) * s, hp + Vector2(tx + 0.03, -0.02 + jaw) * s, hp + Vector2(tx + 0.06, 0.05) * s]), Color("f6e7c8"))
+	shape(ci, [[0.15, -0.2], [-0.25, -0.22], [-0.58, -0.05], [-0.5, 0.03], [-0.25, 0.08], [0.15, 0.18]], hp, s, col)
+	shape(ci, [[0.02, -0.2], [0.25, -0.58], [0.12, -0.18]], hp, s, Color("f6e7c8"))
+	shape(ci, [[-0.1, -0.2], [0.0, -0.5], [-0.02, -0.18]], hp, s, Color("f6e7c8"))
+	ci.draw_circle(hp + Vector2(-0.52, -0.06) * s, s * 0.02, OUTLINE)
+	glow(ci, hp + Vector2(-0.12, -0.1) * s, s * 0.09, Color("ffcf4a"), 2)
 	ci.draw_circle(hp + Vector2(-0.12, -0.1) * s, s * 0.05, Color("ffcf4a"))
-	ci.draw_circle(hp + Vector2(-0.12, -0.1) * s, s * 0.02, OUTLINE)
-	# smoke from nostril
+	ci.draw_line(hp + Vector2(-0.12, -0.14) * s, hp + Vector2(-0.12, -0.06) * s, OUTLINE, maxf(1.0, s * 0.02))
+	# Smoke from the nostril.
 	var ph := fmod(t * 0.7, 1.0)
 	ci.draw_circle(hp + Vector2(-0.6 - ph * 0.3, -0.1 - ph * 0.4) * s, s * (0.04 + ph * 0.08), Color(0.6, 0.6, 0.65, 0.4 * (1.0 - ph)))
+
+
+static func P2(c: Vector2, s: float, x: float, y: float) -> Vector2:
+	return c + Vector2(x, y) * s

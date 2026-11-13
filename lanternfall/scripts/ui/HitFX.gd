@@ -31,6 +31,8 @@ func _ready() -> void:
 		duration = 0.3
 	elif kind == "heal":
 		duration = 0.8
+	elif kind == "burst":
+		duration = 0.5
 
 
 func _process(delta: float) -> void:
@@ -52,9 +54,25 @@ func _draw() -> void:
 				var p0 := off + Vector2(-ext, -ext * 0.6)
 				var p1 := off + Vector2(ext, ext * 0.6)
 				draw_line(p0, p1, Color(1, 1, 1, a * (0.9 - k * 0.2)), (6.0 - k * 1.5) * a + 1.0, true)
+			# Impact flash + crescent arc.
+			if u < 0.35:
+				draw_circle(Vector2.ZERO, 46.0 * (1.0 - u * 2.0), Color(1, 1, 1, 0.25 * (1.0 - u * 2.8)))
+			draw_arc(Vector2.ZERO, 50.0 + u * 20.0, -PI * 0.85, -PI * 0.15, 24, Color(color, a * 0.7), 5.0 * a + 0.5, true)
 			for sp in _sparks:
 				var p: Vector2 = sp["dir"] * sp["speed"] * u * 0.5
-				draw_circle(p, sp["size"] * a, Color(color, a))
+				draw_line(p, p - sp["dir"] * 12.0 * a, Color(color.lightened(0.3), a), sp["size"] * a, true)
+				draw_circle(p, sp["size"] * a * 0.7, Color(1, 1, 1, a))
+		"burst":
+			var rr := 30.0 + u * 120.0
+			draw_arc(Vector2.ZERO, rr, 0, TAU, 48, Color(color, a * 0.8), 6.0 * a + 1.0, true)
+			draw_arc(Vector2.ZERO, rr * 0.7, 0, TAU, 48, Color(1, 1, 1, a * 0.5), 2.0, true)
+			for i in 12:
+				var ang := i * TAU / 12.0 + u * 0.6
+				var d := Vector2(cos(ang), sin(ang))
+				draw_line(d * rr * 0.55, d * (rr * 0.55 + 26.0 * a), Color(color.lightened(0.4), a), 3.0 * a + 0.5, true)
+			for sp in _sparks:
+				var p3: Vector2 = sp["dir"] * sp["speed"] * u * 0.6
+				draw_circle(p3, sp["size"] * a, Color(color.lightened(0.3), a))
 		"spark":
 			for sp in _sparks:
 				var p2: Vector2 = sp["dir"] * sp["speed"] * u * 0.4

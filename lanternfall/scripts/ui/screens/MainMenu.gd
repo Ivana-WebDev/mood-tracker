@@ -3,6 +3,7 @@ extends Screen
 
 var _t := 0.0
 var _settings_box: VBoxContainer
+var _logo: Control
 
 
 func _ready() -> void:
@@ -13,11 +14,13 @@ func _ready() -> void:
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(col)
 	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 210)
+	spacer.custom_minimum_size = Vector2(0, 186)
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(spacer)
-	col.add_child(UI.label("LANTERNFALL", 64, Palette.GOLD, HORIZONTAL_ALIGNMENT_CENTER))
-	col.add_child(UI.label("A roguelike deckbuilder", 20, Palette.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER))
+	_logo = Control.new()
+	_logo.custom_minimum_size = Vector2(0, 120)
+	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(_logo)
 	var btns := UI.vbox(12)
 	btns.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btns.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -49,11 +52,48 @@ func _draw() -> void:
 	draw_colored_polygon(pts, Palette.GOLD)
 	var inner := PackedVector2Array([c + Vector2(0, -24), c + Vector2(15, 0), c + Vector2(0, 24), c + Vector2(-15, 0)])
 	draw_colored_polygon(inner, Color("fff4d6"))
+	if _logo != null and _logo.is_visible_in_tree():
+		_draw_logo(_logo.get_global_rect())
 	# Drifting embers
 	for i in 18:
 		var x := fmod(i * 137.0 + _t * (8 + i % 5 * 3), size.x)
 		var y := size.y - fmod(i * 59.0 + _t * (20 + i % 7 * 6), size.y)
 		draw_circle(Vector2(x, y), 1.5 + (i % 3), Color(Palette.GOLD, 0.25))
+
+
+## Hand-drawn animated logo: per-letter wave, glowing layered outline, a shimmer sweep and an ornamental subtitle bar.
+func _draw_logo(r: Rect2) -> void:
+	var f := UI.font()
+	var title := "LANTERNFALL"
+	var fs := 76
+	var total := f.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + (title.length() - 1) * 4.0
+	var x := r.get_center().x - total / 2.0
+	var base_y := r.position.y + 70.0
+	var sweep := fmod(_t * 0.35, 1.6) - 0.3
+	for i in title.length():
+		var ch := title[i]
+		var w := f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var u := (x + w * 0.5 - (r.get_center().x - total / 2.0)) / total
+		var p := Vector2(x, base_y + sin(_t * 1.6 + i * 0.55) * 3.0)
+		var shine := clampf(1.0 - absf(u - sweep) * 7.0, 0.0, 1.0)
+		draw_string_outline(f, p, ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 22, Color(Palette.GOLD, 0.08))
+		draw_string_outline(f, p + Vector2(0, 5), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 10, Color(0.05, 0.03, 0.02, 0.9))
+		draw_string_outline(f, p, ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 10, Color("2a1a0c"))
+		draw_string_outline(f, p, ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, Color("a8681f"))
+		draw_string(f, p + Vector2(0, 2), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("d98a2b"))
+		draw_string(f, p, ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("ffc95a").lerp(Color("fff6dc"), shine))
+		x += w + 4.0
+	# Ornamental bar with diamonds and the subtitle.
+	var cy := base_y + 26.0
+	var cx := r.get_center().x
+	var half := total * 0.5
+	for sgn in [-1.0, 1.0]:
+		var sg: float = sgn
+		draw_line(Vector2(cx + sg * 130, cy + 8), Vector2(cx + sg * half, cy + 8), Color(Palette.GOLD, 0.6), 2.0, true)
+		CardFrame.gem(self, Vector2(cx + sg * (half + 10), cy + 8), 6.0, Palette.GOLD)
+		CardFrame.four_star(self, Vector2(cx + sg * 118, cy + 8), 6.0, Color("ffe7a8"))
+	draw_string_outline(f, Vector2(cx - 110, cy + 15), "A ROGUELIKE DECKBUILDER", HORIZONTAL_ALIGNMENT_CENTER, 220, 14, 4, Color(0, 0, 0, 0.7))
+	draw_string(f, Vector2(cx - 110, cy + 15), "A ROGUELIKE DECKBUILDER", HORIZONTAL_ALIGNMENT_CENTER, 220, 14, Palette.TEXT_DIM.lightened(0.2))
 
 
 func _continue() -> void:

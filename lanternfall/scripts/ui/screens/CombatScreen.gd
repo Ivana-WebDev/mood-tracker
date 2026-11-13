@@ -161,6 +161,8 @@ func _sync_hand() -> void:
 			var v := CardView.new(c, cm)
 			v.position = draw_btn.position + Vector2(0, -60)
 			v.scale = Vector2(0.4, 0.4)
+			v.rotation = -0.7
+			v.set_meta("fresh", true)
 			v.pressed_at.connect(_on_card_pressed)
 			v.dragged_to.connect(_on_card_dragged)
 			v.released_at.connect(_on_card_released)
@@ -191,6 +193,8 @@ func _animate_out(v: CardView) -> void:
 		tw.tween_property(v, "position", Vector2(size.x / 2.0 - CardView.CARD_SIZE.x / 2.0, size.y * 0.3), 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tw.parallel().tween_property(v, "rotation", 0.0, 0.14)
 		tw.parallel().tween_property(v, "scale", Vector2(1.1, 1.1), 0.14)
+		var bc: Color = Palette.type_color(str(v.data.get("type", "skill")))
+		tw.tween_callback(func(): HitFX.spawn(fx_layer, Vector2(size.x / 2.0, size.y * 0.3 + CardView.CARD_SIZE.y / 2.0), "burst", bc))
 		tw.tween_interval(0.08)
 	var dest := discard_btn.position + Vector2(-20, -80)
 	tw.tween_property(v, "position", dest, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -236,9 +240,15 @@ func _layout_hand() -> void:
 			v.z_index = 30
 		var tw := v.create_tween()
 		tw.set_parallel(true)
-		tw.tween_property(v, "position", pos, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tw.tween_property(v, "rotation", rot, 0.18)
-		tw.tween_property(v, "scale", sc, 0.18)
+		if v.get_meta("fresh", false):
+			v.set_meta("fresh", false)
+			tw.tween_property(v, "position", pos, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tw.tween_property(v, "rotation", rot, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tw.tween_property(v, "scale", sc, 0.28)
+		else:
+			tw.tween_property(v, "position", pos, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.tween_property(v, "rotation", rot, 0.18)
+			tw.tween_property(v, "scale", sc, 0.18)
 
 
 func _on_card_pressed(_v: CardView, _pos: Vector2) -> void:

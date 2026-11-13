@@ -2,7 +2,16 @@
 
 A 2D roguelike deckbuilder for **Android and PC (Windows, Linux, macOS)**, built with **Godot 4.3 (GDScript)**. You fight turn-based card battles, pick a route through branching maps, draft cards, collect relics, and work through **2 Acts** with **3 heroes**. The game runs in landscape and is built for touch.
 
-Everything is drawn in code with vector shapes: outlined, cel-shaded characters with idle animation, gradient cards with art matched to each card's effect, layered night-sky landscapes, and hit and spark effects. The project has no texture assets. It's light, scales cleanly to any screen density, and builds straight to an `.apk`.
+Everything is drawn in code with vector shapes: outlined, cel-shaded characters with idle animation, gradient cards with art matched to each card's effect, layered night-sky landscapes, and hit and spark effects.
+
+The game is animated throughout:
+- an animated title logo;
+- an iris-wipe transition between screens;
+- night skies with moon rays, drifting clouds, fireflies, and tree, spire and crystal silhouettes for each act;
+- combatants standing on glowing rune circles, with idle breathing, white hit flashes and a particle dissolve on death;
+- hexagonal intent badges that glow brighter for big attacks;
+- playable cards ringed by a pulsing rim with a spark tracing the edge, cards that spring into the hand, and a burst when a card is played;
+- a map with light flowing toward your next nodes, studded node rims, a spiked boss node, and your hero standing on your current node. The project has no texture assets. It's light, scales cleanly to any screen density, and builds straight to an `.apk`.
 
 ---
 

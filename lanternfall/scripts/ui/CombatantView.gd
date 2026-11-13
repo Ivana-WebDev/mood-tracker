@@ -23,6 +23,8 @@ var targeted: bool = false
 var targetable: bool = false
 var _t: float = 0.0
 var _shown_hp: float = 0.0
+var dying: float = -1.0          # >= 0 while the death dissolve plays (0..1)
+var _motes: Array = []
 
 
 func _init(combatant: Combatant, combat: CombatManager) -> void:
@@ -69,6 +71,7 @@ func _draw() -> void:
 				var a := i * PI / 2.0 + _t
 				var p := bc + Vector2(0, s * 0.1) + Vector2(cos(a), sin(a)) * s * 1.25
 				draw_circle(p, 5, Palette.BAD)
+	_draw_pedestal(bc, s)
 	var col := color.lerp(Color.WHITE, flash)
 	var low := c.is_player and c.hp > 0 and float(c.hp) / float(maxi(1, c.max_hp)) < LowHPOverlay.THRESHOLD
 	if low:
@@ -76,7 +79,22 @@ func _draw() -> void:
 		for k in 4:
 			draw_circle(bc + Vector2(0, s * 0.2), s * (1.25 + k * 0.18 + hb * 0.1), Color(0.85, 0.05, 0.1, 0.07 + hb * 0.04))
 		col = col.lerp(Color(1.0, 0.3, 0.3), 0.18 + 0.12 * hb)
-	IconDraw.creature(self, shape, bc, s, col, _t, 1.0 if c.is_player else -1.0)
+	# Idle breathing: a gentle squash & stretch anchored at the feet.
+	var feet := bc + Vector2(0, s)
+	var br := sin(_t * 2.4) * 0.018
+	var sc := Vector2(1.0 - br, 1.0 + br)
+	if dying >= 0.0:
+		sc = Vector2(1.0 + dying * 0.25, maxf(0.05, 1.0 - dying * 0.9))
+		col = col.lerp(Color(1, 1, 1), dying * 0.6)
+		col.a = 1.0 - dying
+	draw_set_transform(feet, 0.0, sc)
+	IconDraw.creature(self, shape, bc - feet, s, col, _t, 1.0 if c.is_player else -1.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if flash > 0.05:
+		draw_circle(bc, s * (0.9 + (0.85 - flash) * 0.6), Color(1, 1, 1, flash * 0.18))
+	if dying >= 0.0:
+		_draw_motes(bc, s)
+		return
 	# Intent
 	if not c.is_player and c.is_alive() and cm != null and cm.phase != "over":
 		_draw_intent(f, Vector2(size.x / 2.0, 26))
@@ -135,29 +153,91 @@ func _draw() -> void:
 func _draw_intent(f: Font, at: Vector2) -> void:
 	var info := cm.intent_info(c)
 	var kinds: Array = info["kinds"]
-	var x := at.x - (kinds.size() - 1) * 22.0
 	var bob := sin(_t * 3.0) * 3.0
-	var pill_w := kinds.size() * 44.0 + 12.0
 	var has_attack := "attack" in kinds
-	var pill := Rect2(at.x - pill_w / 2.0, at.y - 22 + bob, pill_w, 64 if has_attack else 44)
-	draw_style_box(Palette.flat(Color(Palette.BG_2, 0.85), 14, Color(Palette.ATTACK if has_attack else Palette.LINE, 0.7), 2), pill)
+	var n := kinds.size()
+	var x := at.x - (n - 1) * 24.0
+	var dmg_total := int(info.get("damage", 0)) * maxi(1, int(info.get("times", 1)))
 	for k in kinds:
-		var p := Vector2(x, at.y + bob)
+		var p := Vector2(x, at.y + 4 + bob)
+		var kc: Color = {"attack": Palette.ATTACK, "defend": Palette.BLOCK, "buff": Palette.BUFF, "debuff": Palette.DEBUFF}.get(k, Palette.TEXT_DIM)
+		# Hexagonal badge with glow.
+		var hex := PackedVector2Array()
+		for i in 6:
+			var a2 := PI / 6.0 + i * PI / 3.0
+			hex.append(p + Vector2(cos(a2), sin(a2)) * 22.0)
+		var pulse := 0.5 + 0.5 * sin(_t * 4.0)
+		if k == "attack":
+			for g in 3:
+				draw_circle(p, 26.0 + g * 5.0 + pulse * 3.0, Color(kc, 0.07 + (0.05 if dmg_total >= 15 else 0.0)))
+		draw_colored_polygon(hex, Color(Palette.BG_2, 0.92))
+		var inner := PackedVector2Array()
+		for q in hex:
+			inner.append(p + (q - p) * 0.82)
+		var cols := PackedColorArray()
+		for q in inner:
+			cols.append(kc.darkened(0.45).lerp(kc.darkened(0.75), clampf((q.y - p.y + 18.0) / 36.0, 0.0, 1.0)))
+		draw_polygon(inner, cols)
+		var hc := hex.duplicate()
+		hc.append(hex[0])
+		draw_polyline(hc, IconDraw.OUTLINE, 4.0, true)
+		draw_polyline(hc, kc.lightened(0.15), 2.0, true)
 		match k:
 			"attack":
-				IconDraw.icon(self, "attack", p, 16, Palette.ATTACK)
-				var txt := str(info["damage"])
-				if int(info["times"]) > 1:
-					txt += "x%d" % int(info["times"])
-				draw_string_outline(f, p + Vector2(-40, 34), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 18, 4, Color(0, 0, 0, 0.8))
-				draw_string(f, p + Vector2(-40, 34), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 18, Palette.TEXT)
+				var sword_c := kc.lerp(Color("ffe08a"), clampf(float(dmg_total - 8) / 20.0, 0.0, 0.6))
+				IconDraw.icon(self, "attack", p + Vector2(0, -2), 15, sword_c)
 			"defend":
-				IconDraw.icon(self, "shield", p, 14, Palette.BLOCK)
+				IconDraw.icon(self, "shield", p, 13, kc.lightened(0.2))
 			"buff":
-				IconDraw.icon(self, "buff", p, 14, Palette.BUFF)
+				IconDraw.icon(self, "buff", p, 13, kc.lightened(0.2))
 			"debuff":
-				IconDraw.icon(self, "debuff", p, 14, Palette.DEBUFF)
-		x += 44.0
+				IconDraw.icon(self, "debuff", p, 13, kc.lightened(0.2))
+		x += 48.0
+	if has_attack:
+		var txt := str(info["damage"])
+		if int(info["times"]) > 1:
+			txt += "x%d" % int(info["times"])
+		var tp := Vector2(at.x - 60, at.y + 46 + bob)
+		var tc := Palette.TEXT if dmg_total < 15 else Color("ffb38a")
+		draw_string_outline(f, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 120, 20, 5, Color(0, 0, 0, 0.85))
+		draw_string(f, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 120, 20, tc)
+
+
+## Glowing rune circle the combatant stands on.
+func _draw_pedestal(bc: Vector2, s: float) -> void:
+	var feet := bc + Vector2(0, s * 1.0)
+	var rc := color.lerp(Palette.GOLD, 0.35) if c.is_player else color.lerp(Palette.BAD, 0.25)
+	var rx := s * 0.95
+	var ry := s * 0.2
+	var fade := 1.0 - maxf(dying, 0.0)
+	draw_colored_polygon(IconDraw.ellipse_pts(feet, rx * 1.15, ry * 1.25, 32), Color(rc, 0.07 * fade))
+	draw_polyline(_ellipse_closed(feet, rx, ry), Color(rc, 0.45 * fade), 2.0, true)
+	draw_polyline(_ellipse_closed(feet, rx * 0.78, ry * 0.78), Color(rc, 0.22 * fade), 1.0, true)
+	for i in 8:
+		var a := _t * (0.5 if c.is_player else -0.5) + i * TAU / 8.0
+		var p := feet + Vector2(cos(a) * rx * 0.89, sin(a) * ry * 0.89)
+		var w := 3.0 + (i % 2) * 2.0
+		draw_line(p - Vector2(w, 0), p + Vector2(w, 0), Color(rc, (0.25 + 0.35 * (0.5 + 0.5 * sin(a))) * fade), 1.5, true)
+	# Rising light motes.
+	for i in 4:
+		var ph := fmod(_t * 0.35 + i * 0.25, 1.0)
+		var a2 := i * 1.7 + _t * 0.2
+		draw_circle(feet + Vector2(cos(a2) * rx * 0.7, -ph * s * 0.9), 1.6, Color(rc, 0.5 * (1.0 - ph) * fade))
+
+
+func _ellipse_closed(cpt: Vector2, rx: float, ry: float) -> PackedVector2Array:
+	var pts := IconDraw.ellipse_pts(cpt, rx, ry, 40)
+	pts.append(pts[0])
+	return pts
+
+
+func _draw_motes(bc: Vector2, s: float) -> void:
+	for m in _motes:
+		var age: float = dying * float(m["speed"])
+		var p: Vector2 = bc + (m["off"] as Vector2) * s + Vector2(sin(age * 6.0 + float(m["ph"])) * 6.0, -age * s * 1.6)
+		var a := clampf(1.0 - dying, 0.0, 1.0)
+		draw_circle(p, float(m["r"]) * (1.0 - dying * 0.5) * 2.2, Color(color.lightened(0.4), 0.12 * a))
+		draw_circle(p, float(m["r"]), Color(color.lightened(0.5), 0.9 * a))
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -204,7 +284,11 @@ func play_hit() -> void:
 
 func play_death() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_motes.clear()
+	for i in 34:
+		_motes.append({"off": Vector2(randf_range(-0.8, 0.8), randf_range(-1.1, 0.9)), "speed": randf_range(0.6, 1.4),
+			"r": randf_range(1.5, 3.8), "ph": randf() * TAU})
+	dying = 0.0
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(self, "modulate:a", 0.0, 0.6)
-	tw.tween_property(self, "body_offset", Vector2(0, 30), 0.6)
+	tw.tween_property(self, "dying", 1.0, 0.9).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_property(self, "modulate:a", 0.0, 0.15)

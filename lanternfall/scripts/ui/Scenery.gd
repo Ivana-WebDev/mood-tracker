@@ -28,6 +28,24 @@ static func draw(ci: CanvasItem, size: Vector2, accent: Color, t: float, horizon
 	for k in 6:
 		ci.draw_circle(mp, 70.0 - k * 9.0, Color(accent.lerp(Palette.GOLD, 0.6), 0.03 + k * 0.012))
 	ci.draw_circle(mp, 22, Color("fff1c8", 0.85))
+	# Moon craters + soft light shafts falling across the sky.
+	ci.draw_circle(mp + Vector2(-7, -5), 5.0, Color("e6d3a3", 0.55))
+	ci.draw_circle(mp + Vector2(6, 6), 3.5, Color("e6d3a3", 0.5))
+	ci.draw_circle(mp + Vector2(8, -8), 2.2, Color("e6d3a3", 0.45))
+	for k in 4:
+		var sway := sin(t * 0.25 + k * 1.7) * 0.06
+		var ang := PI * 0.5 + (k - 1.5) * 0.22 + sway
+		var d1 := Vector2(cos(ang - 0.05), sin(ang - 0.05))
+		var d2 := Vector2(cos(ang + 0.05), sin(ang + 0.05))
+		var ln := hy * 1.1
+		ci.draw_polygon(PackedVector2Array([mp + d1 * 24.0, mp + d1 * ln, mp + d2 * ln, mp + d2 * 24.0]),
+			PackedColorArray([Color(accent.lerp(Palette.GOLD, 0.6), 0.05), Color(accent, 0.0), Color(accent, 0.0), Color(accent.lerp(Palette.GOLD, 0.6), 0.05)]))
+	# Drifting clouds.
+	for i in 5:
+		var cw := 160.0 + (i % 3) * 70.0
+		var cx := fmod(i * 331.0 + t * (4.0 + i * 1.5) - scroll * 0.06, size.x + cw * 2.0) - cw
+		var cy := hy * (0.12 + 0.13 * i)
+		cloud(ci, Vector2(cx, cy), cw, Color(accent.lerp(Color("c8cde8"), 0.5), 0.045 + (i % 2) * 0.02))
 	# Mountain layers (far to near)
 	for layer in 3:
 		var base := hy - 6.0 + layer * 10.0
@@ -43,6 +61,8 @@ static func draw(ci: CanvasItem, size: Vector2, accent: Color, t: float, horizon
 			x += step
 		pts.append(Vector2(size.x, size.y))
 		ci.draw_colored_polygon(pts, col)
+		if layer == 2:
+			_ridge_props(ci, size, base, amp, par, col, accent, t)
 		# distant windows / lights on the far layer
 		if layer == 1:
 			for i in 9:
@@ -76,11 +96,84 @@ static func draw(ci: CanvasItem, size: Vector2, accent: Color, t: float, horizon
 			var lp := top + Vector2(sin(swing) * llen, cos(swing) * llen)
 			ci.draw_line(top, lp, Color(Palette.LINE, 0.8), 1.5, true)
 			lantern(ci, lp, 11.0, Palette.GOLD, t + i)
+	# Fireflies drifting above the ground.
+	for i in 14:
+		var fx := fmod(i * 173.0 + sin(t * 0.4 + i * 2.1) * 60.0 - scroll * 0.4, size.x)
+		var fy := hy - 30.0 + fmod(i * 47.0, maxf(40.0, (size.y - hy) * 0.8)) + sin(t * 0.9 + i) * 14.0
+		var blink := maxf(0.0, sin(t * (1.3 + (i % 4) * 0.4) + i * 1.9))
+		if blink > 0.05:
+			ci.draw_circle(Vector2(fx, fy), 7.0, Color(Color("d8ff8a").lerp(accent, 0.25), 0.06 * blink))
+			ci.draw_circle(Vector2(fx, fy), 1.8, Color(Color("f2ffc8"), 0.85 * blink))
 	# Embers
 	for i in 22:
 		var ex := fmod(i * 127.0 + sin(t * 0.7 + i) * 20.0 - scroll * 0.3, size.x)
 		var ey := size.y - fmod(i * 61.0 + t * (14.0 + (i % 6) * 5.0), size.y)
 		ci.draw_circle(Vector2(ex, ey), 1.2 + (i % 3) * 0.7, Color(Palette.GOLD.lerp(accent, 0.3), 0.18 + 0.12 * sin(t * 3.0 + i)))
+
+	vignette(ci, size)
+
+
+## Darkens the screen edges for a cinematic frame.
+static func vignette(ci: CanvasItem, size: Vector2) -> void:
+	var k := Color(0, 0, 0, 0.42)
+	var z := Color(0, 0, 0, 0.0)
+	var e := minf(size.x, size.y) * 0.22
+	ci.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(size.x, 0), Vector2(size.x, e * 0.6), Vector2(0, e * 0.6)]), PackedColorArray([k, k, z, z]))
+	ci.draw_polygon(PackedVector2Array([Vector2(0, size.y - e), Vector2(size.x, size.y - e), Vector2(size.x, size.y), Vector2(0, size.y)]), PackedColorArray([z, z, k, k]))
+	ci.draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(e, 0), Vector2(e, size.y), Vector2(0, size.y)]), PackedColorArray([k, z, z, k]))
+	ci.draw_polygon(PackedVector2Array([Vector2(size.x - e, 0), Vector2(size.x, 0), Vector2(size.x, size.y), Vector2(size.x - e, size.y)]), PackedColorArray([z, k, k, z]))
+
+
+static func cloud(ci: CanvasItem, p: Vector2, w: float, col: Color) -> void:
+	for j in 5:
+		var u := float(j) / 4.0
+		var r := w * (0.16 + 0.1 * sin(u * PI))
+		ci.draw_colored_polygon(IconDraw.ellipse_pts(p + Vector2((u - 0.5) * w * 0.8, -sin(u * PI) * w * 0.06), r * 1.3, r * 0.5, 18), col)
+
+
+## Silhouettes along the nearest ridge: pines and bare trees in Act 1, ruined spires and crystals in Act 2.
+static func _ridge_props(ci: CanvasItem, size: Vector2, base: float, amp: float, par: float, col: Color, accent: Color, t: float) -> void:
+	var act := 1
+	if GameManager.run.size() > 0:
+		act = int(GameManager.run.get("act", 1))
+	var dark := col.darkened(0.25)
+	var x := -fmod(par, 90.0)
+	var idx := int(floor(par / 90.0))
+	while x < size.x + 90.0:
+		var h := absi((idx * 7919) % 97)
+		if h % 3 != 0:
+			var gx := x + float(h % 40)
+			var gy := base - amp * (0.55 + 0.45 * _noise(gx + par, 3.0)) + 4.0
+			var ht := 26.0 + float(h % 30)
+			if act == 1:
+				if h % 2 == 0:
+					for k in 3:
+						var w := ht * (0.32 - k * 0.07)
+						var yy := gy - ht * (0.25 + k * 0.25)
+						ci.draw_colored_polygon(PackedVector2Array([Vector2(gx - w, yy + ht * 0.3), Vector2(gx, yy - ht * 0.22), Vector2(gx + w, yy + ht * 0.3)]), dark)
+					ci.draw_line(Vector2(gx, gy + 4), Vector2(gx, gy - ht * 0.2), dark, 3.0)
+				else:
+					ci.draw_line(Vector2(gx, gy + 4), Vector2(gx + 2, gy - ht), dark, 3.0, true)
+					for k in 4:
+						var by := gy - ht * (0.35 + k * 0.15)
+						var sg := 1.0 if k % 2 == 0 else -1.0
+						ci.draw_line(Vector2(gx + 1, by), Vector2(gx + sg * ht * 0.3, by - ht * 0.18), dark, 1.6, true)
+			else:
+				if h % 2 == 0:
+					var tw := 7.0 + float(h % 5)
+					ci.draw_colored_polygon(PackedVector2Array([Vector2(gx - tw, gy + 4), Vector2(gx - tw * 0.8, gy - ht * 1.3), Vector2(gx, gy - ht * 1.75),
+						Vector2(gx + tw * 0.8, gy - ht * 1.3), Vector2(gx + tw, gy + 4)]), dark)
+					ci.draw_circle(Vector2(gx, gy - ht), 1.6, Color(Palette.GOLD, 0.4 + 0.3 * sin(t * 1.5 + h)))
+				else:
+					for k in 3:
+						var a := -0.5 + k * 0.5
+						var cl := ht * (0.6 + 0.25 * (1 - absi(k - 1)))
+						var tip := Vector2(gx, gy) + Vector2(sin(a), -cos(a)) * cl
+						var nrm := Vector2(cos(a), sin(a)) * 5.0
+						ci.draw_colored_polygon(PackedVector2Array([Vector2(gx, gy + 3) - nrm, tip, Vector2(gx, gy + 3) + nrm]), Color(accent.lerp(Color("7ee8ff"), 0.5).darkened(0.35), 0.75))
+					ci.draw_circle(Vector2(gx, gy - ht * 0.3), ht * 0.5, Color(Color("7ee8ff"), 0.04))
+		x += 90.0
+		idx += 1
 
 
 static func lantern(ci: CanvasItem, p: Vector2, r: float, col: Color, t: float) -> void:

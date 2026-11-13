@@ -22,6 +22,7 @@ var _press_pos := Vector2.ZERO
 var _pressing := false
 var _moved := false
 var _desc: Label
+var _rim: Control
 
 
 func _init(card_inst: Dictionary = {}, combat = null) -> void:
@@ -48,6 +49,8 @@ func _ready() -> void:
 	_desc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_desc.clip_text = true
 	add_child(_desc)
+	_rim = CardRim.new(self)
+	add_child(_rim)
 	refresh()
 
 
@@ -96,8 +99,8 @@ func _draw() -> void:
 	for i in 3:
 		draw_style_box(Palette.flat(Color(0, 0, 0, 0.16), 18), Rect2(Vector2(2 + i * 2, 5 + i * 2), CARD_SIZE))
 	# Glow for playable / selection
-	if (playable and show_glow) or selected or highlight:
-		var gcol := Palette.GOLD if (selected or highlight) else Palette.GOOD
+	if selected or highlight:
+		var gcol := Palette.GOLD
 		for i in 3:
 			draw_style_box(Palette.flat(Color(gcol, 0.0), 20 + i * 2, Color(gcol, 0.55 - i * 0.16), 3), rect.grow(3 + i * 3))
 	# Hero-themed body, text plate and frame (see CardFrame.gd)
@@ -193,3 +196,55 @@ func _gui_input(event: InputEvent) -> void:
 			_moved = true
 		if _moved:
 			dragged_to.emit(self, event.global_position)
+
+
+## Animated glow around playable cards: a pulsing rim with a spark tracing the edge.
+## A separate child so the (expensive) card face does not have to redraw every frame.
+class CardRim:
+	extends Control
+	var card: CardView
+	var _t := 0.0
+
+	func _init(cv: CardView) -> void:
+		card = cv
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		size = CARD_SIZE
+		_t = randf() * 5.0
+
+	func _process(d: float) -> void:
+		var on := card.playable and card.show_glow and not card.selected and not card.highlight
+		visible = on
+		if on:
+			_t += d
+			queue_redraw()
+
+	func _draw() -> void:
+		var rect := Rect2(Vector2.ZERO, CARD_SIZE)
+		var pulse := 0.5 + 0.5 * sin(_t * 3.0)
+		var g := Palette.GOOD
+		for i in 3:
+			draw_style_box(Palette.flat(Color(g, 0.0), 20 + i * 2, Color(g, (0.45 - i * 0.13) * (0.6 + 0.4 * pulse)), 3), rect.grow(3 + i * 3))
+		# Spark running around the perimeter.
+		var per := 2.0 * (CARD_SIZE.x + CARD_SIZE.y)
+		for k in 2:
+			var dist := fmod(_t * 170.0 + k * per * 0.5, per)
+			var p := _perimeter(dist).lerp(CARD_SIZE / 2.0, -0.02)
+			for j in 5:
+				var q := _perimeter(fmod(dist - j * 7.0 + per, per))
+				draw_circle(q, 3.2 - j * 0.5, Color(Color("d8ffe0"), 0.75 - j * 0.14))
+			draw_circle(p, 8.0, Color(g, 0.18))
+
+	func _perimeter(dist: float) -> Vector2:
+		var w := CARD_SIZE.x + 3.0
+		var h := CARD_SIZE.y + 3.0
+		var o := Vector2(-1.5, -1.5)
+		if dist < w:
+			return o + Vector2(dist, 0)
+		dist -= w
+		if dist < h:
+			return o + Vector2(w, dist)
+		dist -= h
+		if dist < w:
+			return o + Vector2(w - dist, h)
+		dist -= w
+		return o + Vector2(0, h - minf(dist, h))
