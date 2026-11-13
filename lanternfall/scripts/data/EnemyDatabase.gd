@@ -167,6 +167,20 @@ const ENEMIES := {
 			{"name": "Venom Bite", "effects": [{"type": "damage", "value": 12}, {"type": "apply", "status": "bleed", "value": 4}]},
 			{"name": "Devour", "effects": [{"type": "damage", "value": 24}]},
 		]},
+	# ---------------------------------------------------------------- EVENT CHAMPIONS (never on the map; only fought by choice)
+	"masked_champion": {"name": "The Masked Champion", "hp": [74, 80], "shape": "knight", "color": "f2c96b", "size": 1.3, "elite": true,
+		"pattern": "cycle", "moves": [
+			{"name": "Salute", "effects": [{"type": "block", "value": 10, "target": "self"}, {"type": "apply", "status": "strength", "value": 2, "target": "self"}]},
+			{"name": "Riposte", "effects": [{"type": "damage", "value": 7, "times": 2}]},
+			{"name": "Feint", "effects": [{"type": "damage", "value": 5}, {"type": "apply", "status": "vulnerable", "value": 1}]},
+			{"name": "Grand Lunge", "effects": [{"type": "damage", "value": 16}]},
+		]},
+	"ashen_warden": {"name": "The Ashen Warden", "hp": [122, 130], "shape": "golem", "color": "ff7a45", "size": 1.45, "elite": true,
+		"pattern": "cycle", "moves": [
+			{"name": "Stoke", "effects": [{"type": "block", "value": 14, "target": "self"}, {"type": "apply", "status": "strength", "value": 3, "target": "self"}]},
+			{"name": "Ember Fist", "effects": [{"type": "damage", "value": 17}]},
+			{"name": "Cinder Storm", "effects": [{"type": "damage", "value": 5, "times": 3}, {"type": "apply", "status": "bleed", "value": 2}]},
+		]},
 }
 
 const ENCOUNTERS := {

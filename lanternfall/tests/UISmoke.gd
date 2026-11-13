@@ -83,6 +83,15 @@ func _ready() -> void:
 		GameManager.goto("event", {"event": ev})
 		await _frames(12)
 		await _shot("12_event_" + ev)
+	# Choosing to duel the champion must turn the event into a champion fight.
+	GameManager.set_pending({"type": "event", "event": "champions_challenge"})
+	GameManager.goto("event", {"event": "champions_challenge"})
+	await _frames(8)
+	main.current._choose(0)
+	await _frames(30)
+	var champ_ok: bool = main.current_name == "combat" and GameManager.run["pending"].get("kind", "") == "special"
+	print("EVENT FIGHT ", "OK" if champ_ok else "FAILED")
+	await _shot("12z_champion_duel")
 	GameManager.set_pending({"type": "treasure", "gold": 40, "relic": "battle_drum", "opened": false})
 	GameManager.goto("treasure")
 	await _frames(10)

@@ -39,6 +39,10 @@ func _ready() -> void:
 	cm.speed = 0.5 if SaveManager.profile.get("fast_combat", false) else 1.0
 	add_child(cm)
 	cm.setup(params.get("enemies", ["gloom_slime"]), params.get("kind", "monster"))
+	# Ambushes (from events) catch the hero off guard.
+	var ps: Dictionary = params.get("player_status", {})
+	for k in ps:
+		cm.player.add_status(k, int(ps[k]))
 
 	player_view = CombatantView.new(cm.player, cm)
 	player_view.tapped.connect(_on_combatant_tapped)
@@ -89,8 +93,8 @@ func _ready() -> void:
 func _draw() -> void:
 	var kind: String = params.get("kind", "monster")
 	var accent := Palette.SKILL
-	if kind == "elite":
-		accent = Palette.NODE_COLORS["elite"]
+	if kind == "elite" or kind == "special":
+		accent = Palette.NODE_COLORS["elite"] if kind == "elite" else Palette.GOLD
 	elif kind == "boss":
 		accent = Palette.NODE_COLORS["boss"]
 	elif int(GameManager.run.get("act", 1)) == 2:
@@ -561,7 +565,12 @@ func _flash_banner(text: String, color: Color) -> void:
 
 func _on_turn_started(turn: int) -> void:
 	AudioManager.play("turn", -4.0)
-	_flash_banner("Your Turn" if turn > 1 else "Battle Start", Palette.GOLD)
+	var first := "Battle Start"
+	if not params.get("player_status", {}).is_empty():
+		first = "Ambush!"
+	elif params.get("kind", "") == "special":
+		first = "Champion Duel"
+	_flash_banner("Your Turn" if turn > 1 else first, Palette.BAD if first == "Ambush!" and turn == 1 else Palette.GOLD)
 	_refresh()
 
 

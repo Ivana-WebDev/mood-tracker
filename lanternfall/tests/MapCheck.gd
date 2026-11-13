@@ -11,12 +11,24 @@ func _ready() -> void:
 	var no_shop := 0
 	var early := 0
 	var total_nodes := 0
+	var elites := {1: 0, 2: 0}
+	var few_elites := 0
+	var long_streaks := 0
+	var one_shop := 0
 	for i in maps:
 		rng.seed = 1000 + i
 		var m: Dictionary = MapManager.generate(1 + i % 2, rng)
 		var r := _min_rests(m["nodes"])
 		if m["nodes"].filter(func(n): return n["type"] == "shop").is_empty():
 			no_shop += 1
+		if m["nodes"].filter(func(n): return n["type"] == "shop").size() < 2:
+			one_shop += 1
+		var ne: int = m["nodes"].filter(func(n): return n["type"] == "elite").size()
+		elites[1 + i % 2] += ne
+		if ne < MapManager.MIN_ELITES[1 + i % 2]:
+			few_elites += 1
+		if _max_streak(m["nodes"]) > MapManager.MAX_MONSTER_STREAK:
+			long_streaks += 1
 		for n in m["nodes"]:
 			if n["type"] == "rest":
 				if n["floor"] <= 2:
@@ -29,9 +41,25 @@ func _ready() -> void:
 		hist[r] = hist.get(r, 0) + 1
 	print("routes' minimum rest sites (incl. the pre-boss campfire) over %d maps: %s" % [maps, str(hist)])
 	print("rest next to rest: %d   rest in first 3 floors: %d   maps without a shop: %d" % [adjacent, early, no_shop])
-	print("MAPCHECK ", "OK" if adjacent == 0 and early == 0 and no_shop == 0 and not hist.has(1) and not hist.has(0) else "FAILED")
+	print("avg elites: act 1 %.1f, act 2 %.1f   maps under the elite minimum: %d   maps with < 2 shops: %d   routes with > %d fights in a row: %d" % [
+		elites[1] / (maps / 2.0), elites[2] / (maps / 2.0), few_elites, one_shop, MapManager.MAX_MONSTER_STREAK, long_streaks])
+	print("MAPCHECK ", "OK" if adjacent == 0 and early == 0 and no_shop == 0 and few_elites == 0 and long_streaks == 0 and not hist.has(1) and not hist.has(0) else "FAILED")
 	print("avg mid-act rest sites per map: %.1f of %.1f nodes" % [float(total_rest) / maps, float(total_nodes) / maps])
 	get_tree().quit()
+
+
+func _max_streak(nodes: Array) -> int:
+	var order := nodes.duplicate()
+	order.sort_custom(func(a, b): return a["floor"] < b["floor"])
+	var st := {}
+	var worst := 0
+	for n in order:
+		var best := 0
+		for p in MapManager.parents_of(nodes, n["id"]):
+			best = maxi(best, int(st.get(p["id"], 0)))
+		st[n["id"]] = best + 1 if n["type"] == "monster" else 0
+		worst = maxi(worst, st[n["id"]])
+	return worst
 
 
 func _min_rests(nodes: Array) -> int:

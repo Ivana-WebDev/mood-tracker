@@ -44,6 +44,12 @@ func _draw() -> void:
 		"fountain": _fountain(c, s)
 		"duelist": _duelist(c, s)
 		"lost_caravan": _caravan(c, s)
+		"rustling_bushes": _bushes(c, s)
+		"abandoned_chest": _lone_chest(c, s)
+		"champions_challenge": _bridge(c, s, "masked_champion")
+		"toll_bridge": _bridge(c, s, "toll")
+		"night_thief": _thief(c, s)
+		"haunted_altar": _altar(c, s)
 		"shop": _shop(r, ground)
 	draw_style_box(Palette.flat(Color(0, 0, 0, 0), 12, Color(accent, 0.8), 2), r)
 
@@ -207,3 +213,111 @@ func _shop(r: Rect2, ground: float) -> void:
 func coin_stack(p: Vector2) -> void:
 	for i in 4:
 		IconDraw.oval(self, p + Vector2(0, -i * 4), 9, 4, Palette.GOLD.darkened(0.1 * (i % 2)), 1.2)
+
+
+# ---------------------------------------------------------------- risky events
+
+func _bush(p: Vector2, s: float, col: Color, phase: float) -> void:
+	for i in 6:
+		var a := PI + 0.25 + i * 0.5
+		var sh := sin(_t * 9.0 + phase + i) * 0.03 * s if fmod(_t + phase, 3.0) < 0.6 else 0.0
+		IconDraw.ball(self, p + Vector2(cos(a) * 0.45 * s + sh, sin(a) * 0.3 * s), s * 0.3, col.darkened(0.08 * (i % 3)), 1.5)
+
+
+func _bushes(c: Vector2, s: float) -> void:
+	var leaf := Color("2f5a3a")
+	_bush(c + Vector2(-0.9, 0.0) * s, s * 1.0, leaf, 0.0)
+	_bush(c + Vector2(0.15, 0.0) * s, s * 1.25, leaf.lightened(0.05), 1.3)
+	_bush(c + Vector2(1.1, 0.0) * s, s * 0.95, leaf.darkened(0.1), 2.1)
+	# Eyes peering out, blinking at different times.
+	for e in [[-0.9, -0.35, 0.0], [0.05, -0.5, 1.1], [0.35, -0.3, 2.3], [1.1, -0.38, 0.7]]:
+		var ep := c + Vector2(e[0], e[1]) * s
+		if fmod(_t + float(e[2]), 3.2) > 0.18:
+			for dx in [-0.07, 0.07]:
+				IconDraw.glow(self, ep + Vector2(dx, 0) * s, s * 0.06, Color("ffcf4a"), 2)
+				draw_circle(ep + Vector2(dx, 0) * s, s * 0.03, Color("fff1b0"))
+	# A coin glinting at the edge.
+	var gp := c + Vector2(0.55, -0.05) * s
+	draw_circle(gp, s * 0.05, Palette.GOLD)
+	CardFrame.four_star(self, gp + Vector2(0.03, -0.04) * s, s * 0.06 * (0.6 + 0.4 * sin(_t * 3.0)), Color("fff6d8"))
+
+
+func _lone_chest(c: Vector2, s: float) -> void:
+	IconDraw.glow(self, c + Vector2(0, -0.35) * s, s * 0.9, Color("ffcf4a"), 4)
+	var wood := Color("7a4a2c")
+	S([[-0.6, 0.0], [0.6, 0.0], [0.6, -0.55], [-0.6, -0.55]], c, s, wood)
+	S([[-0.62, -0.55], [0.62, -0.55], [0.55, -0.85], [-0.55, -0.85]], c, s, wood.lightened(0.08))
+	for x in [-0.45, 0.45]:
+		S([[x - 0.06, 0.0], [x + 0.06, 0.0], [x + 0.06, -0.85], [x - 0.06, -0.85]], c, s, Palette.GOLD, false)
+	IconDraw.ball(self, c + Vector2(0, -0.55) * s, s * 0.08, Palette.GOLD, 1.5)
+	# ...is that a tooth under the lid? (it twitches now and then)
+	if fmod(_t, 4.0) < 0.3:
+		draw_colored_polygon(PackedVector2Array([c + Vector2(0.2, -0.55) * s, c + Vector2(0.25, -0.45) * s, c + Vector2(0.3, -0.55) * s]), Color("f4ecd8"))
+	for i in 4:
+		var ph := fmod(_t * 0.5 + i * 0.25, 1.0)
+		draw_circle(c + Vector2(-0.4 + i * 0.27, -0.9 - ph * 0.6) * s, s * 0.02, Color("ffe9a8", 1.0 - ph))
+
+
+func _bridge(c: Vector2, s: float, who: String) -> void:
+	# A wooden bridge across a dark chasm.
+	draw_rect(Rect2(c.x - 2.2 * s, c.y - 0.05 * s, 4.4 * s, 0.3 * s), Color("05060c"))
+	var plank := Color("6b4a35")
+	for i in 14:
+		var x := -1.9 + i * 0.29
+		var sag := 0.08 * sin((x + 1.9) / 3.8 * PI)
+		S([[x, -0.1 + sag], [x + 0.25, -0.1 + sag], [x + 0.25, 0.0 + sag], [x, 0.0 + sag]], c, s, plank.darkened(0.1 * (i % 2)), false)
+	for sgn in [-1.0, 1.0]:
+		draw_line(c + Vector2(-1.9, -0.55) * s, c + Vector2(1.9, -0.55) * s, Color("3a2a1f"), 2.0, true)
+		draw_rect(Rect2(c.x + float(sgn) * 1.95 * s - 0.06 * s, c.y - 0.75 * s, 0.12 * s, 0.75 * s), plank.darkened(0.3))
+	if who == "masked_champion":
+		IconDraw.creature(self, "knight", c + Vector2(0.3, -0.75) * s, s * 0.62, Color("f2c96b"), _t, -1.0)
+		for i in 3:
+			coin_stack(c + Vector2(1.35 + i * 0.18, -0.08) * s)
+	else:
+		IconDraw.creature(self, "golem", c + Vector2(-0.6, -0.68) * s, s * 0.55, Color("8a8f6a"), _t, 1.0)
+		IconDraw.creature(self, "golem", c + Vector2(0.8, -0.62) * s, s * 0.48, Color("7a8a6a"), _t + 1.0, -1.0)
+
+
+func _thief(c: Vector2, s: float) -> void:
+	# Your campfire and an emptied pack...
+	var fp := c + Vector2(-0.9, 0.0) * s
+	IconDraw.glow(self, fp + Vector2(0, -0.25) * s, s * 0.6, Color("ff8a4f"), 4)
+	for k in 3:
+		var h := 0.35 + 0.12 * sin(_t * 8.0 + k)
+		S([[-0.15 + k * 0.1, 0.0], [-0.08 + k * 0.1, -h], [0.0 + k * 0.1, 0.0]], fp + Vector2(-0.05, 0) * s, s, Color("ffb347"), false)
+	S([[-0.35, 0.0], [-0.1, 0.0], [-0.15, -0.3], [-0.3, -0.3]], c + Vector2(-0.2, 0) * s, s, Color("6b5a40"))
+	# ...and a hooded figure fleeing with a jingling sack.
+	var run_x := fmod(_t * 0.25, 1.0)
+	var tp := c + Vector2(0.4 + run_x * 1.2, -0.55 + absf(sin(_t * 8.0)) * -0.05) * s
+	S([[-0.18, -0.45], [0.18, -0.45], [0.28, 0.4], [-0.28, 0.4]], tp, s, Color("2b2a3a"))
+	IconDraw.ball(self, tp + Vector2(0, -0.55) * s, s * 0.2, Color("2b2a3a"), 1.5)
+	draw_circle(tp + Vector2(0.08, -0.55) * s, s * 0.03, Color("ffcf4a"))
+	IconDraw.ball(self, tp + Vector2(-0.35, -0.1) * s, s * 0.17, Color("8a6a3a"), 1.5)
+	for i in 3:
+		var cp := tp + Vector2(-0.45 - i * 0.18, 0.2 + i * 0.12) * s
+		draw_circle(cp, s * 0.035, Palette.GOLD)
+
+
+func _altar(c: Vector2, s: float) -> void:
+	var stone := Color("4a4a5a")
+	S([[-0.8, 0.0], [0.8, 0.0], [0.7, -0.45], [-0.7, -0.45]], c, s, stone)
+	S([[-0.9, -0.45], [0.9, -0.45], [0.9, -0.55], [-0.9, -0.55]], c, s, stone.lightened(0.1))
+	# Hollow-eyed idol.
+	S([[-0.22, -0.55], [0.22, -0.55], [0.18, -1.25], [0.0, -1.4], [-0.18, -1.25]], c, s, stone.darkened(0.2))
+	for ex in [-0.08, 0.08]:
+		var glow_a := 0.4 + 0.4 * sin(_t * 1.5)
+		IconDraw.glow(self, c + Vector2(ex, -1.1) * s, s * 0.08, Color("9fd4ff"), 2)
+		draw_circle(c + Vector2(ex, -1.1) * s, s * 0.035, Color(0.85, 0.95, 1.0, glow_a))
+	# Candles with cold white flames.
+	for x in [-0.7, -0.45, 0.45, 0.7]:
+		var cp := c + Vector2(x, -0.55) * s
+		draw_rect(Rect2(cp + Vector2(-0.04, -0.25) * s, Vector2(0.08, 0.25) * s), Color("e9e2cf"))
+		var fl := 0.12 + 0.03 * sin(_t * 9.0 + x * 10.0)
+		IconDraw.glow(self, cp + Vector2(0, -0.32) * s, s * 0.12, Color("cfe6ff"), 2)
+		S([[-0.03, -0.25], [0.0, -0.25 - fl], [0.03, -0.25]], cp, s, Color("eaf4ff"), false)
+	# Gold offerings.
+	for i in 3:
+		coin_stack(c + Vector2(-0.25 + i * 0.25, -0.55) * s)
+	# Faint ghost drifting behind.
+	var gp := c + Vector2(1.3, -0.9 + sin(_t) * 0.08) * s
+	draw_colored_polygon(IconDraw.ellipse_pts(gp, s * 0.22, s * 0.32, 18), Color(0.8, 0.9, 1.0, 0.12 + 0.06 * sin(_t * 2.0)))

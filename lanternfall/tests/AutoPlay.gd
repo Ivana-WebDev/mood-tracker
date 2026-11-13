@@ -33,6 +33,7 @@ func _ready() -> void:
 	_test_shop_potions()
 	_test_act_heal()
 	print("potions drunk across all runs: %d" % _potions_total)
+	print("events seen: %d different, %d visits, %d turned into fights" % [_event_counts.size(), _event_counts.values().reduce(func(a, b): return a + b, 0), _event_fights])
 	failures += failures_logic
 	print("AUTOPLAY DONE failures=%d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
@@ -65,6 +66,17 @@ func _play_run(ch: String, run_seed: int) -> Dictionary:
 		var pick: int = _choose_node(avail)
 		GameManager.enter_node(pick)
 		var p: Dictionary = GameManager.run["pending"]
+		if p["type"] == "event":
+			# The bot always takes the first option, resolving gambles with the game's RNG.
+			var ev: Dictionary = EventDatabase.EVENTS[p["event"]]
+			var fight := _bot_effects(ev["options"][0]["effects"])
+			_event_counts[p["event"]] = int(_event_counts.get(p["event"], 0)) + 1
+			if fight.is_empty():
+				GameManager.node_done()
+				continue
+			_event_fights += 1
+			GameManager.start_event_fight(fight)
+			p = GameManager.run["pending"]
 		match p["type"]:
 			"combat":
 				var won: bool = await _fight(p)
@@ -106,21 +118,34 @@ func _play_run(ch: String, run_seed: int) -> Dictionary:
 						GameManager.remove_card(int(c["uid"]))
 						break
 				GameManager.node_done()
-			"event":
-				var ev: Dictionary = EventDatabase.EVENTS[p["event"]]
-				for e in ev["options"][0]["effects"]:
-					match e["type"]:
-						"gold": GameManager.add_gold(int(e["value"]))
-						"hp": GameManager.change_hp(int(e["value"]))
-						"max_hp": GameManager.change_max_hp(int(e["value"]))
-						"relic": RelicManager.add_relic(RelicManager.roll_relic(e["value"]))
-						"add_curse": GameManager.add_card(e["value"])
-				GameManager.node_done()
 			"treasure":
 				GameManager.add_gold(int(p["gold"]))
 				RelicManager.add_relic(p["relic"])
 				GameManager.node_done()
 	return {"won": false, "floor": run["floor"], "act": run["act"], "error": "guard exceeded"}
+
+
+var _event_counts := {}
+var _event_fights := 0
+
+
+## Applies event effects the way the event screen does; returns a fight effect if one was triggered.
+func _bot_effects(effects: Array) -> Dictionary:
+	for e in effects:
+		match e["type"]:
+			"gold": GameManager.add_gold(int(e["value"]))
+			"hp": GameManager.change_hp(int(e["value"]))
+			"max_hp": GameManager.change_max_hp(int(e["value"]))
+			"relic": RelicManager.add_relic(RelicManager.roll_relic(e["value"]))
+			"add_curse": GameManager.add_card(e["value"])
+			"potion": GameManager.add_potion(GameManager.roll_potion())
+			"fight": return e
+			"chance":
+				var won := GameManager.rng.randf() < float(e.get("p", 0.5))
+				var f := _bot_effects(e.get("win" if won else "lose", []))
+				if not f.is_empty():
+					return f
+	return {}
 
 
 func _choose_node(avail: Array) -> int:
@@ -164,12 +189,15 @@ func _fight(p: Dictionary) -> bool:
 	cm.fast_mode = true
 	add_child(cm)
 	cm.setup(p["enemies"], p["kind"])
+	var ps: Dictionary = p.get("player_status", {})
+	for k in ps:
+		cm.player.add_status(k, int(ps[k]))
 	cm.start()
 	var turns := 0
 	while cm.phase != "over" and turns < 60:
 		turns += 1
 		# Drink potions in hard fights or when low.
-		if cm.phase == "player" and (p["kind"] != "monster" or cm.player.hp < cm.player.max_hp * 0.4):
+		if cm.phase == "player" and (not p["kind"] in ["monster"] or cm.player.hp < cm.player.max_hp * 0.4):
 			while not GameManager.potions().is_empty() and cm.phase == "player":
 				var alive := cm.alive_enemies()
 				if not cm.use_potion(0, alive[0] if not alive.is_empty() else null):

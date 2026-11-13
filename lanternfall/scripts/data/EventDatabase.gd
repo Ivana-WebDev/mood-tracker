@@ -1,7 +1,11 @@
 class_name EventDatabase
 ## Text events. Each option has "effects" (Array of {type, value...}) and optional "cost" requirements.
 ## Effect types: gold, hp, max_hp, heal_pct, relic (random of rarity), card_reward, upgrade_random,
-## remove_card (opens picker), upgrade_card (opens picker), add_curse, nothing.
+## remove_card (opens picker), upgrade_card (opens picker), add_curse, nothing,
+##   potion (random potion if a slot is free),
+##   fight {encounter: easy/hard/elite | enemies: [...] | by_act: {1: [...], 2: [...]}, reward: monster/elite/special,
+##          ambush: bool (you start Vulnerable), hidden: bool (the option tooltip does not reveal the foe)},
+##   chance {p, win: [effects], lose: [effects], win_result, lose_result}: a gamble resolved when chosen.
 
 const EVENTS := {
 	"shrine": {"title": "The Whispering Shrine",
@@ -36,5 +40,57 @@ const EVENTS := {
 		"options": [
 			{"label": "Search the crates (Gain 35 Gold)", "effects": [{"type": "gold", "value": 35}], "result": "Mostly junk, but some coin."},
 			{"label": "Help the survivor (Heal 12, gain a card)", "effects": [{"type": "hp", "value": 12}, {"type": "card_reward", "value": "normal"}], "result": "A grateful merchant shares supplies."},
+		]},
+	# ---------------------------------------------------------------- risky / dangerous events
+	"rustling_bushes": {"title": "Rustling Brambles",
+		"text": "The brambles beside the road shiver, though there is no wind. Something glints inside: coins, or eyes?",
+		"options": [
+			{"label": "Reach in (Gold and a potion... or something worse)", "effects": [{"type": "chance", "p": 0.5,
+				"win": [{"type": "gold", "value": 55}, {"type": "potion"}], "win_result": "A dead traveller's purse, and a potion still corked.",
+				"lose": [{"type": "fight", "encounter": "easy", "reward": "monster", "ambush": true, "hidden": true}], "lose_result": "Claws close around your wrist. Ambush!"}],
+				"result": ""},
+			{"label": "Hack through quickly (Lose 5 HP)", "effects": [{"type": "hp", "value": -5}], "result": "Thorns bite, but nothing follows you."},
+			{"label": "Back away slowly", "effects": [{"type": "chance", "p": 0.7, "win": [], "win_result": "Whatever it was lets you go.",
+				"lose": [{"type": "fight", "encounter": "easy", "reward": "monster", "ambush": true, "hidden": true}], "lose_result": "Too slow. They pour out of the brambles!"}],
+				"result": ""},
+		]},
+	"abandoned_chest": {"title": "A Chest Left Alone",
+		"text": "An ornate chest sits in the middle of the road with no tracks around it. It is almost too inviting.",
+		"options": [
+			{"label": "Open it (Relic... or worse)", "effects": [{"type": "chance", "p": 0.55,
+				"win": [{"type": "relic", "value": "uncommon"}], "win_result": "The lid creaks open on a real treasure.",
+				"lose": [{"type": "fight", "enemies": ["gilded_mimic"], "reward": "elite", "hidden": true}], "lose_result": "The lid opens... and so does its mouth. A Mimic!"}],
+				"result": ""},
+			{"label": "Kick it first (Lose 3 HP, then open it safely)", "effects": [{"type": "hp", "value": -3}, {"type": "gold", "value": 40}], "result": "It was only a chest. Your toe disagrees. 40 Gold inside."},
+			{"label": "Leave it", "effects": [], "result": "Some gifts are best left unopened."},
+		]},
+	"champions_challenge": {"title": "The Champion's Bridge",
+		"text": "A masked warrior bars the bridge. \"Defeat me and my hoard is yours: gold, a relic, and a rare technique.\"",
+		"options": [
+			{"label": "Accept the duel (Hard fight: big rewards)", "effects": [{"type": "fight", "by_act": {1: ["masked_champion"], 2: ["ashen_warden"]}, "reward": "special"}], "result": ""},
+			{"label": "Pay respects (Gain 1 Max HP)", "effects": [{"type": "max_hp", "value": 1}], "result": "The champion bows and lets you pass."},
+		]},
+	"toll_bridge": {"title": "Toll Bridge",
+		"text": "Hulking shapes guard a rickety bridge. \"Toll is 45 gold, little light. Or we take it from your bones.\"",
+		"options": [
+			{"label": "Pay the toll (Lose 45 Gold)", "cost_gold": 45, "effects": [{"type": "gold", "value": -45}], "result": "They count every coin twice."},
+			{"label": "Refuse (Fight)", "effects": [{"type": "fight", "encounter": "hard", "reward": "monster", "bonus_gold": 45}], "result": ""},
+			{"label": "Wade the river (Lose 10 HP)", "effects": [{"type": "hp", "value": -10}], "result": "The current is cold and cruel, but you make it."},
+		]},
+	"night_thief": {"title": "Thief in the Night",
+		"text": "You wake to a hooded figure rifling through your pack. They bolt into the dark with a jingling bag.",
+		"options": [
+			{"label": "Give chase (Fight, recover your gold and more)", "effects": [{"type": "fight", "enemies": ["bandit"], "reward": "monster", "bonus_gold": 50}], "result": ""},
+			{"label": "Let them go (Lose 40 Gold)", "effects": [{"type": "gold", "value": -40}], "result": "Lighter pockets. Heavier heart."},
+		]},
+	"haunted_altar": {"title": "Haunted Altar",
+		"text": "Candles burn without melting on a cold stone altar. Gold offerings lie piled before a hollow-eyed idol.",
+		"options": [
+			{"label": "Take the offerings (Gain 90 Gold, may anger the dead)", "effects": [{"type": "gold", "value": 90}, {"type": "chance", "p": 0.5,
+				"win": [], "win_result": "The candles gutter, but nothing stirs.",
+				"lose": [{"type": "fight", "encounter": "easy", "reward": "monster", "ambush": true, "hidden": true}], "lose_result": "The candles flare white. The dead rise for their gold!"}],
+				"result": ""},
+			{"label": "Leave an offering (Lose 4 Max HP, choose a rare card)", "effects": [{"type": "max_hp", "value": -4}, {"type": "card_reward", "value": "rare"}], "result": "The idol's eyes glow, briefly, with approval."},
+			{"label": "Leave", "effects": [], "result": "You do not disturb the dead."},
 		]},
 }

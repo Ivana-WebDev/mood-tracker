@@ -5,6 +5,12 @@ const FLOORS := 12 # regular floors (0..11); boss sits on floor 12
 const LANES := 7
 const PATHS := 6
 const TREASURE_FLOOR := 6
+## Minimum elites per act (Act 2 is meant to be the tougher, more rewarding road).
+const MIN_ELITES := {1: 3, 2: 4}
+## The longest run of plain monster fights a route may have before one becomes an event.
+const MAX_MONSTER_STREAK := 3
+
+var _act := 1
 
 
 func generate(act: int, rng: RandomNumberGenerator) -> Dictionary:
@@ -41,6 +47,7 @@ func generate(act: int, rng: RandomNumberGenerator) -> Dictionary:
 	for n in nodes:
 		if n["floor"] == FLOORS - 1:
 			n["next"].append(boss["id"])
+	_act = act
 	_assign_types(nodes, rng)
 	return {"act": act, "nodes": nodes, "boss": boss["id"], "floors": FLOORS + 1}
 
@@ -115,9 +122,11 @@ func _assign_types(nodes: Array, rng: RandomNumberGenerator) -> void:
 			chosen = "monster"
 		n["type"] = chosen
 	_guarantee_mid_rest(nodes, rng)
-	# Make sure there is at least one shop and one elite per act.
-	_guarantee(nodes, "shop", 3, 9, rng)
-	_guarantee(nodes, "elite", 5, 10, rng)
+	# Two shops per act (one in each half) and a healthy number of elites, spread out.
+	_guarantee_in(nodes, "shop", 2, 6, rng)
+	_guarantee_in(nodes, "shop", 7, 10, rng)
+	_guarantee_elites(nodes, int(MIN_ELITES.get(_act, 3)), rng)
+	_break_monster_streaks(nodes)
 
 
 ## Every route must pass a rest site between floors 4 and 9, on top of the campfire before the boss.
@@ -198,10 +207,70 @@ func _guarantee(nodes: Array, t: String, min_f: int, max_f: int, rng: RandomNumb
 		cands[rng.randi_range(0, cands.size() - 1)]["type"] = t
 
 
+## Places a node of type t on floors min_f..max_f unless one is already there.
+func _guarantee_in(nodes: Array, t: String, min_f: int, max_f: int, rng: RandomNumberGenerator) -> void:
+	for n in nodes:
+		if n["type"] == t and n["floor"] >= min_f and n["floor"] <= max_f:
+			return
+	var cands := nodes.filter(func(n): return n["floor"] >= min_f and n["floor"] <= max_f and n["type"] in ["monster", "event"] \
+		and not _touches_type(nodes, n, t))
+	if not cands.is_empty():
+		cands[rng.randi_range(0, cands.size() - 1)]["type"] = t
+
+
+## Adds elites until the act has at least `count`, never next to another elite, preferring new lanes.
+func _guarantee_elites(nodes: Array, count: int, rng: RandomNumberGenerator) -> void:
+	var min_f := 4 if _act == 1 else 3
+	var guard := 0
+	while nodes.filter(func(n): return n["type"] == "elite").size() < count and guard < 20:
+		guard += 1
+		var lanes_used := {}
+		for n in nodes:
+			if n["type"] == "elite":
+				lanes_used[n["lane"]] = true
+		var cands := nodes.filter(func(n): return n["floor"] >= min_f and n["floor"] <= 10 and n["type"] in ["monster", "event"] \
+			and not _touches_type(nodes, n, "elite"))
+		if cands.is_empty():
+			return
+		var fresh := cands.filter(func(n): return not lanes_used.has(n["lane"]))
+		var pool: Array = fresh if not fresh.is_empty() else cands
+		pool[rng.randi_range(0, pool.size() - 1)]["type"] = "elite"
+
+
+func _touches_type(nodes: Array, n: Dictionary, t: String) -> bool:
+	for nx in n["next"]:
+		if nodes[nx]["type"] == t:
+			return true
+	for p in parents_of(nodes, n["id"]):
+		if p["type"] == t:
+			return true
+	return false
+
+
+## No route should drag through more than MAX_MONSTER_STREAK plain fights in a row.
+func _break_monster_streaks(nodes: Array) -> void:
+	var order := nodes.duplicate()
+	order.sort_custom(func(a, b): return a["floor"] < b["floor"])
+	var streak := {}
+	for n in order:
+		var best := 0
+		for p in parents_of(nodes, n["id"]):
+			best = maxi(best, int(streak.get(p["id"], 0)))
+		if n["type"] == "monster":
+			if best >= MAX_MONSTER_STREAK and n["floor"] >= 2:
+				n["type"] = "event"
+				streak[n["id"]] = 0
+			else:
+				streak[n["id"]] = best + 1
+		else:
+			streak[n["id"]] = 0
+
+
 func _roll_type(f: int, rng: RandomNumberGenerator) -> String:
-	var table := [["monster", 46], ["event", 22]]
+	var table := [["monster", 44], ["event", 22]]
+	if f >= (4 if _act == 1 else 3):
+		table.append(["elite", 15 if _act == 1 else 18])
 	if f >= 4:
-		table.append(["elite", 13])
 		table.append(["rest", 11])
 	if f >= 2:
 		table.append(["shop", 8])

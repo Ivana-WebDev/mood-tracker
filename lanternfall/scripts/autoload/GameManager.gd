@@ -169,6 +169,34 @@ func _roll_relic_rarity() -> String:
 	return "rare"
 
 
+# ------------------------------------------------------------------ fights started by events
+
+## Enemy list for an event "fight" effect.
+func event_fight_enemies(e: Dictionary) -> Array:
+	if e.has("enemies"):
+		return (e["enemies"] as Array).duplicate()
+	if e.has("by_act"):
+		var by: Dictionary = e["by_act"]
+		var key = int(run["act"])
+		if not by.has(key):
+			key = str(key)
+		return (by.get(key, by.values()[0]) as Array).duplicate()
+	var table: Dictionary = EnemyDatabase.ENCOUNTERS[int(run["act"])]
+	var options: Array = table.get(e.get("encounter", "easy"), table["easy"])
+	return (options[rng.randi_range(0, options.size() - 1)] as Array).duplicate()
+
+
+## Turns the current event into a combat. Rewards follow e["reward"] ("monster", "elite" or "special").
+func start_event_fight(e: Dictionary) -> Dictionary:
+	var p := {"type": "combat", "kind": str(e.get("reward", "monster")), "enemies": event_fight_enemies(e),
+		"from_event": true, "bonus_gold": int(e.get("bonus_gold", 0))}
+	if e.get("ambush", false):
+		p["player_status"] = {"vulnerable": 1}
+	set_pending(p)
+	goto("combat", p)
+	return p
+
+
 # ------------------------------------------------------------------ combat results
 
 func on_combat_won(kind: String, hp_left: int) -> void:
@@ -177,13 +205,20 @@ func on_combat_won(kind: String, hp_left: int) -> void:
 	match kind:
 		"monster": gold = rng.randi_range(12, 20)
 		"elite": gold = rng.randi_range(28, 38)
+		"special": gold = rng.randi_range(55, 75)
 		"boss": gold = rng.randi_range(90, 110)
-	gold = int(round(gold * RelicManager.gold_multiplier()))
+	gold = int(round(gold * RelicManager.gold_multiplier())) + int(run.get("pending", {}).get("bonus_gold", 0))
+	var cards := roll_card_rewards("elite" if kind == "special" else kind)
+	if kind == "special":
+		# A champion always yields at least one rare technique.
+		var rare := roll_card_rewards("rare", 1)
+		if not rare.is_empty() and not cards.any(func(c): return CardDatabase.CARDS[c["id"]]["rarity"] == "rare"):
+			cards[0] = rare[0]
 	var reward := {"type": "reward", "kind": kind, "gold": gold, "gold_taken": false,
-		"cards": roll_card_rewards(kind), "card_taken": false, "relic": "", "relic_taken": false, "boss_relics": []}
+		"cards": cards, "card_taken": false, "relic": "", "relic_taken": false, "boss_relics": []}
 	# Potions are an occasional bonus: 30% after normal fights, 45% after elites, none from bosses,
 	# and the chance halves right after a fight that already dropped one.
-	var potion_chance: float = {"monster": 0.30, "elite": 0.45, "boss": 0.0}.get(kind, 0.3)
+	var potion_chance: float = {"monster": 0.30, "elite": 0.45, "special": 0.6, "boss": 0.0}.get(kind, 0.3)
 	if run.get("last_fight_potion", false):
 		potion_chance *= 0.5
 	reward["potion"] = roll_potion() if rng.randf() < potion_chance else ""
@@ -191,6 +226,9 @@ func on_combat_won(kind: String, hp_left: int) -> void:
 	reward["potion_taken"] = false
 	if kind == "elite":
 		reward["relic"] = RelicManager.roll_relic(_roll_relic_rarity())
+		run["stats"]["elites"] = int(run["stats"]["elites"]) + 1
+	elif kind == "special":
+		reward["relic"] = RelicManager.roll_relic("rare" if rng.randf() < 0.4 else "uncommon")
 		run["stats"]["elites"] = int(run["stats"]["elites"]) + 1
 	if kind == "boss":
 		run["stats"]["bosses"] = int(run["stats"]["bosses"]) + 1

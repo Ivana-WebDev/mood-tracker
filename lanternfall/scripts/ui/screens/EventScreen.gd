@@ -63,15 +63,26 @@ func _build() -> void:
 		_box.add_child(b)
 
 
+var _left := false   # set once an effect turned this event into a fight
+
+
 func _choose(i: int) -> void:
 	var o: Dictionary = _event["options"][i]
 	var pending: Dictionary = GameManager.run["pending"]
 	pending["result"] = o.get("result", "")
 	SaveManager.save_run()
-	for e in o["effects"]:
-		await _apply(e)
+	await _apply_all(o["effects"])
+	if _left:
+		return
 	SaveManager.save_run()
 	_build()
+
+
+func _apply_all(effects: Array) -> void:
+	for e in effects:
+		if _left:
+			return
+		await _apply(e)
 
 
 ## Hover text describing exactly what an option gives or costs.
@@ -92,6 +103,22 @@ func _option_tip(o: Dictionary) -> String:
 				lines.append("Pick a card to remove from your deck.")
 			"upgrade_random":
 				lines.append("Upgrades %d random cards." % int(e["value"]))
+			"potion":
+				lines.append("A random potion (if you have a free slot).")
+			"chance":
+				lines.append("A gamble: it may not go your way.")
+			"fight":
+				if e.get("hidden", false):
+					lines.append("Something is lurking here...")
+				else:
+					var names: PackedStringArray = []
+					for id in GameManager.event_fight_enemies(e) if e.has("enemies") or e.has("by_act") else []:
+						names.append(EnemyDatabase.get_enemy(id)["name"])
+					var foe := ", ".join(names) if not names.is_empty() else "%s foes" % ("tough" if e.get("encounter", "") == "hard" else "local")
+					var rw: String = {"monster": "normal rewards", "elite": "elite rewards (relic)", "special": "champion rewards: lots of gold, a relic and a guaranteed rare card"}.get(str(e.get("reward", "monster")), "rewards")
+					lines.append("Fight %s for %s." % [foe, rw])
+					if int(e.get("bonus_gold", 0)) > 0:
+						lines.append("+%d bonus Gold if you win." % int(e["bonus_gold"]))
 	return "\n".join(lines)
 
 
@@ -118,6 +145,19 @@ func _note_gain(kind: String, id: String) -> void:
 
 func _apply(e: Dictionary) -> void:
 	match e["type"]:
+		"chance":
+			var won := GameManager.rng.randf() < float(e.get("p", 0.5))
+			var pending: Dictionary = GameManager.run["pending"]
+			pending["result"] = str(e.get("win_result" if won else "lose_result", pending.get("result", "")))
+			await _apply_all(e.get("win" if won else "lose", []))
+		"fight":
+			_left = true
+			GameManager.start_event_fight(e)
+		"potion":
+			if GameManager.potion_slots_free():
+				var pid := GameManager.roll_potion()
+				if pid != "" and GameManager.add_potion(pid):
+					_note_gain("potion", pid)
 		"gold":
 			GameManager.add_gold(int(e["value"]))
 		"hp":
