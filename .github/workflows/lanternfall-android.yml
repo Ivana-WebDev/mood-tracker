@@ -2,6 +2,11 @@ name: Lanternfall – Android APK + PC builds
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional: publish a permanent GitHub Release under this new tag (e.g. lanternfall-classic-v1)"
+        required: false
+        default: ""
   push:
     branches: ["**"]
     # Pushing a tag like lanternfall-classic-v1 also publishes a permanent GitHub Release (job "release").
@@ -124,15 +129,17 @@ jobs:
           path: build/macos/Lanternfall.zip
           if-no-files-found: error
 
-  # Runs only for version tags (e.g. lanternfall-classic-v1): attaches every build to a permanent
-  # GitHub Release. Workflow artifacts expire after 90 days; release files do not.
+  # Runs for version tags (e.g. lanternfall-classic-v1), or for a manual run with "release_tag" set
+  # (which creates that tag on the commit): attaches every build to a permanent GitHub Release. Workflow artifacts expire after 90 days; release files do not.
   release:
     name: Publish GitHub Release
     needs: [android, desktop]
-    if: startsWith(github.ref, 'refs/tags/lanternfall-')
+    if: startsWith(github.ref, 'refs/tags/lanternfall-') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -140,18 +147,20 @@ jobs:
       - name: Package downloads
         run: |
           mkdir -p out
-          cp dist/Lanternfall-android/Lanternfall-debug.apk "out/Lanternfall-${GITHUB_REF_NAME}-android.apk"
-          (cd dist/Lanternfall-windows && zip -9 "../../out/Lanternfall-${GITHUB_REF_NAME}-windows.zip" Lanternfall.exe)
+          cp dist/Lanternfall-android/Lanternfall-debug.apk "out/Lanternfall-${TAG}-android.apk"
+          (cd dist/Lanternfall-windows && zip -9 "../../out/Lanternfall-${TAG}-windows.zip" Lanternfall.exe)
           chmod +x dist/Lanternfall-linux/Lanternfall.x86_64
-          tar -czf "out/Lanternfall-${GITHUB_REF_NAME}-linux.tar.gz" -C dist/Lanternfall-linux Lanternfall.x86_64
-          cp dist/Lanternfall-macos/Lanternfall.zip "out/Lanternfall-${GITHUB_REF_NAME}-macos.zip"
+          tar -czf "out/Lanternfall-${TAG}-linux.tar.gz" -C dist/Lanternfall-linux Lanternfall.x86_64
+          cp dist/Lanternfall-macos/Lanternfall.zip "out/Lanternfall-${TAG}-macos.zip"
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          name: ${{ env.TAG }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           files: out/*
           body: |
-            Permanent builds of Lanternfall at `${{ github.ref_name }}`.
+            Permanent builds of Lanternfall at `${{ env.TAG }}` (commit ${{ github.sha }}).
 
             - **Android:** `*-android.apk`. Copy it to your phone and open it (allow "install unknown apps" if asked).
             - **Windows:** `*-windows.zip`. Unzip it and run `Lanternfall.exe` (SmartScreen: More info, then Run anyway).
