@@ -334,7 +334,11 @@ static func creature(ci: CanvasItem, kind: String, c: Vector2, s: float, color: 
 		"eye": _eye_priest(ci, cc, s, color, t, facing)
 		"crown": _hollow_king(ci, cc, s, color, t)
 		"dragon": _wyrm(ci, cc, s, color, t)
-		_: ball(ci, cc, s * 0.7, color)
+		_:
+			if EnemyArt.has(kind):
+				EnemyArt.draw(ci, kind, cc, s, color, t, facing)
+			else:
+				ball(ci, cc, s * 0.7, color)
 
 
 static func _clockwright(ci: CanvasItem, c: Vector2, s: float, col: Color, t: float) -> void:

@@ -100,52 +100,37 @@ func _draw() -> void:
 		var gcol := Palette.GOLD if (selected or highlight) else Palette.GOOD
 		for i in 3:
 			draw_style_box(Palette.flat(Color(gcol, 0.0), 20 + i * 2, Color(gcol, 0.55 - i * 0.16), 3), rect.grow(3 + i * 3))
-	# Body gradient + frame
+	# Hero-themed body, text plate and frame (see CardFrame.gd)
 	var body := rounded_pts(rect, 16)
-	_gradient_poly(body, type_col.darkened(0.62), Palette.BG.darkened(0.2), 0.0, CARD_SIZE.y)
-	var border := Palette.GOOD if data.get("upgraded", false) else type_col
-	draw_style_box(Palette.flat(Color(0, 0, 0, 0), 16, border, 3), rect)
-	draw_style_box(Palette.flat(Color(0, 0, 0, 0), 12, Color(rare_col, 0.55), 1), rect.grow(-6))
-	# Rivets
-	for p in [Vector2(10, 64), Vector2(CARD_SIZE.x - 10, 64), Vector2(10, CARD_SIZE.y - 12), Vector2(CARD_SIZE.x - 10, CARD_SIZE.y - 12)]:
-		draw_circle(p, 2.5, Color(rare_col, 0.8))
+	CardFrame.draw_body(self, data, body)
+	CardFrame.draw_text_plate(self, data)
 	# Art window
-	var art := Rect2(14, 42, CARD_SIZE.x - 28, 74)
+	var art := Rect2(14, 42, CARD_SIZE.x - 28, 72)
 	var art_pts := rounded_pts(art, 9)
 	_gradient_poly(art_pts, type_col.darkened(0.25).lerp(Palette.BG, 0.25), Palette.BG.darkened(0.3), art.position.y, art.end.y)
 	_draw_art(art)
+	# Inner vignette + bevelled art frame
 	var closed := art_pts.duplicate()
 	closed.append(art_pts[0])
-	draw_polyline(closed, Color(type_col.lightened(0.1), 0.9), 2.0, true)
-	# Name ribbon (notched banner across the top of the art)
-	var by := 10.0
-	var banner := PackedVector2Array([Vector2(4, by + 2), Vector2(CARD_SIZE.x - 4, by + 2), Vector2(CARD_SIZE.x - 12, by + 15),
-		Vector2(CARD_SIZE.x - 4, by + 28), Vector2(4, by + 28), Vector2(12, by + 15)])
-	_gradient_poly(banner, type_col.darkened(0.15), type_col.darkened(0.55), by, by + 28)
-	var bc := banner.duplicate()
-	bc.append(banner[0])
-	draw_polyline(bc, IconDraw.OUTLINE, 2.0, true)
+	draw_polyline(closed, Color(0, 0, 0, 0.35), 5.0, true)
+	var th := CardFrame.theme_for(data)
+	var trim := CardFrame.trim_color(th, str(data.get("rarity", "common")))
+	draw_polyline(closed, IconDraw.OUTLINE, 3.5, true)
+	draw_polyline(closed, trim.darkened(0.15), 2.0, true)
+	draw_line(art.position + Vector2(9, 1), Vector2(art.end.x - 9, art.position.y + 1), Color(1, 1, 1, 0.25), 1.0, true)
+	CardFrame.draw_frame(self, data, rect, data.get("upgraded", false))
+	CardFrame.draw_banner(self, data)
 	var name_col := Color("c9ffd9") if data.get("upgraded", false) else Palette.TEXT
-	var name_size := 16 if data["name"].length() <= 12 else (14 if data["name"].length() <= 15 else 12)
-	draw_string_outline(f, Vector2(18, by + 21), data["name"], HORIZONTAL_ALIGNMENT_CENTER, CARD_SIZE.x - 36, name_size, 4, Color(0, 0, 0, 0.6))
-	draw_string(f, Vector2(18, by + 21), data["name"], HORIZONTAL_ALIGNMENT_CENTER, CARD_SIZE.x - 36, name_size, name_col)
-	# Type plate + rarity gem
-	var plate := Rect2(CARD_SIZE.x / 2.0 - 34, 110, 68, 18)
-	draw_style_box(Palette.flat(Palette.BG_2, 9, Color(type_col, 0.8), 1), plate)
-	draw_string(f, Vector2(plate.position.x, plate.position.y + 13), data["type"].capitalize(), HORIZONTAL_ALIGNMENT_CENTER, plate.size.x, 11, Palette.TEXT_DIM)
+	var by := 10.0
+	var name_size := 16 if data["name"].length() <= 11 else (14 if data["name"].length() <= 14 else 12)
+	draw_string_outline(f, Vector2(32, by + 20), data["name"], HORIZONTAL_ALIGNMENT_CENTER, CARD_SIZE.x - 42, name_size, 4, Color(0, 0, 0, 0.7))
+	draw_string(f, Vector2(32, by + 20), data["name"], HORIZONTAL_ALIGNMENT_CENTER, CARD_SIZE.x - 42, name_size, name_col)
+	CardFrame.draw_plaque(self, data, f)
+	# Rarity gem at the foot of the card
 	var gem := Vector2(CARD_SIZE.x / 2.0, CARD_SIZE.y - 7)
-	IconDraw.fill(self, PackedVector2Array([gem + Vector2(0, -6), gem + Vector2(6, 0), gem + Vector2(0, 6), gem + Vector2(-6, 0)]), rare_col, 1.5, true)
-	# Cost gem
-	if int(data["cost"]) >= 0:
-		var oc := Vector2(15, 15)
-		var can := playable or ctx == null
-		var ec := Palette.ENERGY if can else Palette.TEXT_DIM.darkened(0.3)
-		draw_circle(oc, 18, IconDraw.OUTLINE)
-		draw_circle(oc, 16, ec.darkened(0.35))
-		draw_circle(oc + Vector2(-1.5, -1.5), 13, ec)
-		draw_circle(oc + Vector2(-5, -6), 4, Color(1, 1, 1, 0.45))
-		draw_string_outline(f, oc + Vector2(-15, 8), str(data["cost"]), HORIZONTAL_ALIGNMENT_CENTER, 30, 21, 3, Color(1, 1, 1, 0.4))
-		draw_string(f, oc + Vector2(-15, 8), str(data["cost"]), HORIZONTAL_ALIGNMENT_CENTER, 30, 21, Palette.BG)
+	if th["id"] != "duskdancer":
+		CardFrame.gem(self, gem, 5.5, rare_col)
+	CardFrame.draw_cost(self, data, playable or ctx == null, f)
 
 
 ## Every card has its own illustration (see CardArt.gd).
