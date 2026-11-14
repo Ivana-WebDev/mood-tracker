@@ -1,0 +1,168 @@
+name: Lanternfall – Android APK + PC builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional: publish a permanent GitHub Release under this new tag (e.g. lanternfall-classic-v1)"
+        required: false
+        default: ""
+  push:
+    branches: ["**"]
+    # Pushing a tag like lanternfall-classic-v1 also publishes a permanent GitHub Release (job "release").
+    tags: ["lanternfall-*"]
+    paths:
+      - "lanternfall/**"
+      - ".github/workflows/lanternfall-android.yml"
+  pull_request:
+    paths:
+      - "lanternfall/**"
+
+env:
+  GODOT_VERSION: "4.3"
+  PROJECT_DIR: lanternfall
+
+jobs:
+  test:
+    name: Headless logic tests
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import project
+        run: godot --headless --editor --quit --path "$PROJECT_DIR" || true
+      - name: Simulated runs (AutoPlay bot)
+        run: godot --headless --path "$PROJECT_DIR" res://tests/AutoPlay.tscn
+      - name: Map generation rules (rest sites)
+        run: godot --headless --path "$PROJECT_DIR" res://tests/MapCheck.tscn | tee mapcheck.txt && grep -q "MAPCHECK OK" mapcheck.txt
+
+  android:
+    name: Export Android APK
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image installs templates + editor settings (Android SDK path) under /root;
+      # GitHub Actions runs with HOME=/github/home, so move them into place.
+      - name: Set up export templates and editor settings
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/ ~/.config/
+          cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          cp -r /root/.config/godot ~/.config/godot
+
+      - name: Create debug keystore
+        run: |
+          keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Export debug APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          godot --headless --editor --quit --path "$PROJECT_DIR" || true
+          godot --headless --path "$PROJECT_DIR" --export-debug "Android" "$GITHUB_WORKSPACE/build/Lanternfall-debug.apk"
+          ls -la "$GITHUB_WORKSPACE/build"
+
+      # Optional signed release build: add repository secrets
+      # ANDROID_RELEASE_KEYSTORE_BASE64, ANDROID_RELEASE_KEYSTORE_USER, ANDROID_RELEASE_KEYSTORE_PASSWORD.
+      - name: Export release APK
+        if: ${{ env.HAS_RELEASE_KEY == 'true' }}
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_RELEASE_KEYSTORE_USER }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/release.keystore"
+          godot --headless --path "$PROJECT_DIR" --export-release "Android" "$GITHUB_WORKSPACE/build/Lanternfall-release.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-android
+          path: build/*.apk
+          if-no-files-found: error
+
+  desktop:
+    name: Export PC builds (Windows / Linux / macOS)
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+      - name: Export
+        run: |
+          godot --headless --editor --quit --path "$PROJECT_DIR" || true
+          mkdir -p "$GITHUB_WORKSPACE/build/windows" "$GITHUB_WORKSPACE/build/linux" "$GITHUB_WORKSPACE/build/macos"
+          godot --headless --path "$PROJECT_DIR" --export-release "Windows" "$GITHUB_WORKSPACE/build/windows/Lanternfall.exe"
+          godot --headless --path "$PROJECT_DIR" --export-release "Linux" "$GITHUB_WORKSPACE/build/linux/Lanternfall.x86_64"
+          godot --headless --path "$PROJECT_DIR" --export-release "macOS" "$GITHUB_WORKSPACE/build/macos/Lanternfall.zip"
+          chmod +x "$GITHUB_WORKSPACE/build/linux/Lanternfall.x86_64"
+          ls -laR "$GITHUB_WORKSPACE/build"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-windows
+          path: build/windows/Lanternfall.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-linux
+          path: build/linux/Lanternfall.x86_64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lanternfall-macos
+          path: build/macos/Lanternfall.zip
+          if-no-files-found: error
+
+  # Runs for version tags (e.g. lanternfall-classic-v1), or for a manual run with "release_tag" set
+  # (which creates that tag on the commit): attaches every build to a permanent GitHub Release. Workflow artifacts expire after 90 days; release files do not.
+  release:
+    name: Publish GitHub Release
+    needs: [android, desktop]
+    if: startsWith(github.ref, 'refs/tags/lanternfall-') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.release_tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Package downloads
+        run: |
+          mkdir -p out
+          cp dist/Lanternfall-android/Lanternfall-debug.apk "out/Lanternfall-${TAG}-android.apk"
+          (cd dist/Lanternfall-windows && zip -9 "../../out/Lanternfall-${TAG}-windows.zip" Lanternfall.exe)
+          chmod +x dist/Lanternfall-linux/Lanternfall.x86_64
+          tar -czf "out/Lanternfall-${TAG}-linux.tar.gz" -C dist/Lanternfall-linux Lanternfall.x86_64
+          cp dist/Lanternfall-macos/Lanternfall.zip "out/Lanternfall-${TAG}-macos.zip"
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.TAG }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          files: out/*
+          body: |
+            Permanent builds of Lanternfall at `${{ env.TAG }}` (commit ${{ github.sha }}).
+
+            - **Android:** `*-android.apk`. Copy it to your phone and open it (allow "install unknown apps" if asked).
+            - **Windows:** `*-windows.zip`. Unzip it and run `Lanternfall.exe` (SmartScreen: More info, then Run anyway).
+            - **macOS:** `*-macos.zip`. Unzip it, then right-click `Lanternfall.app` and choose Open the first time.
+            - **Linux:** `*-linux.tar.gz`. Extract it and run `./Lanternfall.x86_64`.
